@@ -1,0 +1,23 @@
+{
+  "mlb2_experiment": {
+    "video_root": "/scratch/lbshks/mlb2/experiment",
+    "extension": "mkv",
+    "result_root": "/scratch/lbshks/mlb2/experiment",
+    "cage_map_file": "cage_map.json",
+    "wrapper": "dlc_sbatch_superanimal.sh",
+    "job_name": "mlb2-superanimal",
+    "experiment_layout": true,
+    "skip_existing": true,
+    "inference_batch_size": 8,
+    "detector_batch_size": 8,
+    "adapt_batch_size": 8
+  },
+  "rat_experiment": {
+    "video_root": "/scratch/lbshks/rat_lockbox/videos",
+    "extension": "avi",
+    "result_root": "/scratch/lbshks/super_animal/tracks/rat_experiment",
+    "map": "rats",
+    "wrapper": "dlc_sbatch_rlb.sh",
+    "job_name": "rat-superanimal"
+  }
+}
