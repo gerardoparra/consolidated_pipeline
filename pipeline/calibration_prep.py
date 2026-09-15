@@ -22,7 +22,7 @@ Usage (CLI)
 
 Usage (library)
 ---------------
-    from video_calibration.prepare_calibration_dataset import (
+    from pipeline.calibration_prep import (
         extract_zip, restructure_and_downsample, downsample_dir
     )
 """
@@ -168,6 +168,12 @@ def extract_or_prepare_folder(
     if unzip and temp_dir.exists() and not keep_temp:
         shutil.rmtree(temp_dir, ignore_errors=True)
     return destination
+
+
+def extract_zip(zip_path: str | Path, target_dir: str | Path,
+                keep_temp: bool = False) -> Path:
+    """Compatibility name for extracting a session zip."""
+    return extract_or_prepare_folder(str(zip_path), str(target_dir), unzip=True, keep_temp=keep_temp)
 
 
 def collect_files(folder: Path) -> tuple[list[Path], list[Path]]:

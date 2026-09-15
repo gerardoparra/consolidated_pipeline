@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlb2-consolidated-pipeline"
+version = "0.1.0"
+description = "MLB2 multi-camera calibration, SuperAnimal tracking, and Anipose triangulation"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "tables",
+  "opencv-contrib-python"
+]
+
+[project.optional-dependencies]
+validation = ["aniposelib", "matplotlib"]
+
+[project.scripts]
+mlb2-pipeline = "pipeline.main:main"
+
+[tool.setuptools]
+packages = ["pipeline", "config"]
+
+[tool.setuptools.package-data]
+pipeline = ["*.sh"]
+config = ["setup.json"]

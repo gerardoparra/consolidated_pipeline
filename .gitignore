@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+anipose_smoke_*/
+calibration_smoke_*/
+# Preserves a pre-existing untracked reference without making it runtime config.
+config/_reference/

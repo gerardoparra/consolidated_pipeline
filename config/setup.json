@@ -1,0 +1,79 @@
+{
+  "experiment": "sliding_lockbox",
+  "hosts": {
+    "local": {
+      "experiment_dir": "C:\\Users\\Gerardo\\Documents\\Lockbox\\mlb2\\experiment",
+      "anipose_command": ["C:\\ProgramData\\anaconda3\\Scripts\\conda.exe", "run", "-n", "anipose", "anipose"],
+      "model_folder": "C:\\Users\\Gerardo\\Documents\\Lockbox\\mlb2\\models\\superanimal_top-mlb2-2026-08-27"
+    },
+    "hpc": {
+      "experiment_dir": "/scratch/lbshks/mlb2/experiment",
+      "project_dir": "/scratch/lbshks/super_animal",
+      "anipose_command": ["anipose"],
+      "model_folder": "/scratch/lbshks/mlb2/models/superanimal_top-mlb2-2026-08-27",
+      "sandbox": "/scratch/lbshks/super_animal/deeplabcut_sandbox",
+      "cache_dir": "/scratch/lbshks/super_animal/cache",
+      "tmp_dir": "/scratch/lbshks/super_animal/tmp",
+      "singularity_module": "singularity"
+    }
+  },
+  "cages": {
+    "CAGE1": {"camera06": "top", "camera07": "front", "camera08": "left", "camera09": "right", "camera10": "back"},
+    "CAGE2": {"camera01": "left", "camera02": "front", "camera03": "right", "camera04": "top", "camera05": "back"}
+  },
+  "calibration": {
+    "fps": 3.0,
+    "board_size": [10, 7],
+    "detection_samples": 12,
+    "board_type": "charuco",
+    "board_marker_bits": 4,
+    "board_marker_dict_number": 50,
+    "board_square_side_length": 26,
+    "board_marker_length": 13,
+    "manually_verify": false
+  },
+  "evaluation": {
+    "label_csv_root": null,
+    "output_root": null,
+    "threshold_px": 5.0,
+    "image_size": [1456, 1088]
+  },
+  "pose": {
+    "video_extension": "mkv",
+    "calibration_video_extension": "avi",
+    "skip_existing": true,
+    "inference_batch_size": 8,
+    "detector_batch_size": 8,
+    "adapt_batch_size": 8,
+    "model_name": "hrnet_w32",
+    "detector_name": "fasterrcnn_resnet50_fpn_v2",
+    "max_individuals": 1,
+    "perspective_models": {
+      "top": "superanimal_topviewmouse",
+      "front": "superanimal_quadruped",
+      "side": "superanimal_quadruped",
+      "left": "superanimal_quadruped",
+      "right": "superanimal_quadruped",
+      "back": "superanimal_quadruped"
+    }
+  },
+  "anipose": {
+    "project": "mlb2",
+    "nesting": 2,
+    "cam_regex": "camera([0-9][0-9])",
+    "num_cams": 5,
+    "ransac": true,
+    "optim": false,
+    "reproj_error_threshold": 3,
+    "score_threshold": 0.6,
+    "scheme": [["nose", "ear_left"], ["nose", "ear_right"], ["ear_left", "ear_right"], ["nose", "tail_base"]],
+    "constraints": [["nose", "ear_left"], ["nose", "ear_right"], ["ear_left", "ear_right"], ["nose", "tail_base"]]
+  },
+  "slurm": {
+    "partition": "ex_scioi_gpu,scioi_gpu,gpu",
+    "gres": "gpu:1",
+    "constraint": "gpu",
+    "time": "1-03:00",
+    "job_name": "mlb2-superanimal"
+  }
+}

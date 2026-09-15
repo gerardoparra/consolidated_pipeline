@@ -34,7 +34,6 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from aniposelib.cameras import CameraGroup
 
 
 def _resolve_calibration_tomls(calibration_inputs):
@@ -87,8 +86,12 @@ def _extract_serial_token(text):
     """
     Extracts a camera serial-like numeric token from text.
     """
-    m = re.search(r"(\d{6,})", str(text))
-    return m.group(1) if m else None
+    value = str(text)
+    camera = re.search(r"camera([0-9]{2})", value, flags=re.IGNORECASE)
+    if camera:
+        return camera.group(1)
+    serial = re.search(r"(\d{6,})", value)
+    return serial.group(1) if serial else None
 
 
 def _camera_serials_from_calibration_dir(calibration_dir, n_cams_total):
@@ -357,10 +360,20 @@ def _extract_leading_yymmdd(text, field_name):
     Extract the leading YYMMDD token from strings like:
     260226_Rat_Lockbox_...
     """
-    m = re.match(r"^(\d{6})", str(text))
-    if not m:
-        raise ValueError(f"Could not extract leading YYMMDD from {field_name}: {text}")
-    return m.group(1)
+    value = str(text)
+    # MLB2 sliding-lockbox sessions use DD_MM_YYYY; older rat sessions use YYMMDD.
+    local = re.match(r"^(\d{2})[_-](\d{2})[_-](\d{4})", value)
+    if local:
+        day, month, year = local.groups()
+        return year[-2:] + month + day
+    iso = re.match(r"^(\d{4})[_-]?(\d{2})[_-]?(\d{2})", value)
+    if iso:
+        year, month, day = iso.groups()
+        return year[-2:] + month + day
+    old = re.match(r"^(\d{6})", value)
+    if old:
+        return old.group(1)
+    raise ValueError(f"Could not extract a date from {field_name}: {text}")
 
 
 def _summary_calibration_label(calibration_path):
@@ -466,6 +479,8 @@ def run_reprojection_batch(
         ``'manual_vs_reproj'``: ``{(calibration_path, label_csv): fig}``
         ``'charuco'``: ``{calibration_path: {cam_idx: [fig, ...]}}``
     """
+    from aniposelib.cameras import CameraGroup
+
     calibration_paths = _resolve_calibration_tomls(calibration_inputs)
     if not calibration_paths:
         raise ValueError("No calibration.toml files resolved from calibration_inputs.")
