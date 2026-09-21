@@ -15,6 +15,32 @@ needs them, the pipeline generates `config.toml`, `cage_map.json`, and `jobs.jso
 in the experiment root. The generated `config.toml` replaces an older one; make
 changes in `setup.json` so they survive the next run.
 
+## Pipeline stages
+
+The `run` command advances through the automatic stages below in order. The
+calibration check is manual-only. `run` resumes from completed outputs, previews
+missing GPU work unless `--submit` is supplied, and can be run again after
+tracking finishes.
+
+| Stage / CLI command | What it does | Main output |
+| --- | --- | --- |
+| Import and prepare / `prepare` | Extract a session zip, organize a raw folder, or accept a prepared session; sort calibration and behavioral videos into each cage. | `SESSION/CAGE*/calibration/` and `videos-raw/` |
+| Downsample / `downsample` | Sample each calibration video at a synchronized low frame rate for Anipose. The MLB2 default is 3 FPS. | Calibration `.avi` files |
+| Camera calibration / `calibrate` | Use the ChArUco-board videos to estimate the five cameras' geometry for each cage. | `calibration/calibration.toml` |
+| Calibration check / `labels`, `evaluate` (manual only) | Extract frames for manual labeling, then triangulate manually labeled keypoints with the calibration and reproject them into the camera views. Report mean pixel error as a sanity check; a warning does not stop tracking. | Reprojection summary CSV and figures |
+| 2D tracking / `pose` | Run SuperAnimal on the raw behavioral videos with the configured top-view or quadruped model. On HPC, preview or submit a GPU Slurm job. | Sibling `tracks/` HDF5 files and adaptation reports |
+| Convert tracks / `convert` | Group synchronized five-camera trials, verify matching frames and shared keypoints, and write Anipose-compatible 2D tracks. | `pose-2d/` HDF5 files |
+| 3D pose / `triangulate` | Use Anipose and the saved camera calibration to triangulate complete 2D trials. | `pose-3d/` trial CSV files |
+
+The optional calibration check uses triangulation only to test camera geometry;
+the final 3D pose stage triangulates SuperAnimal tracks from the behavioral
+videos. Calibration and its manual-label check are implemented in
+`CalibrationProcessor`; tracking, conversion, and final triangulation are in
+`PoseProcessor`. The `prepare` command also performs downsampling; the separate
+`downsample` command resumes that step for an organized session. Run `evaluate`
+manually after calibration whenever labeled camera frames are available; the
+full `run` command does not invoke it, even when label paths are configured.
+
 ## Run one session
 
 From this repository, use Python 3.10 or newer:
@@ -24,10 +50,10 @@ python -m pipeline.main run "C:\Users\Gerardo\Documents\Lockbox\mlb2\experiment\
 ```
 
 The default run previews a Slurm command for missing 2D tracks. It performs
-preparation and any feasible camera calibration first, evaluates reprojection
-error if manual label CSVs are configured, and converts and triangulates any
-trials whose tracks are already complete. After the Slurm job finishes, invoke
-the same command again to advance the remaining trials.
+preparation and any feasible camera calibration first, then converts and
+triangulates any trials whose tracks are already complete. It does not perform
+the manual-label calibration check. After the Slurm job finishes, invoke the
+same command again to advance the remaining trials.
 
 On HPC, place this repository at `/scratch/lbshks/super_animal`, activate the
 host environment described below, and run from a CPU allocation:
@@ -74,9 +100,10 @@ python -m pipeline.main triangulate SESSION_DIR
 ```
 
 `labels` writes frames to the configured DLC project for manual labeling.
-Reprojection evaluation is optional until `evaluation.label_csv_root` is set or
-`--labels` is supplied. An error above `evaluation.threshold_px` warns and still
-allows tracking. Trial conversion requires five synchronized cameras, finished
+`evaluate` runs only when explicitly requested. It uses
+`evaluation.label_csv_root` or its `--labels` argument to locate manual labels;
+an error above `evaluation.threshold_px` reports a warning. Trial conversion
+requires five synchronized cameras, finished
 HDF5 tracks and adaptation reports, matching frame counts, and shared
 `x`/`y`/`likelihood` bodyparts. Incomplete trials are listed with a reason.
 
@@ -107,9 +134,21 @@ that invokes it, so use a CPU allocation for a full session rather than doing
 that work on the login node. The GPU worker is submitted separately by `--submit`.
 
 First, copy the whole repository to the `hosts.hpc.project_dir` in
-`config/setup.json` (currently `/scratch/lbshks/super_animal`). Use a cluster
-Python module or installation with Python 3.10 or newer and `venv`, then create
-the host environment in a persistent location:
+`config/setup.json` (currently `/scratch/lbshks/super_animal`). This must include
+`pyproject.toml` at the project root, alongside `pipeline/` and `config/`.
+Earlier deployments that copied only those two directories need the manifest
+copied as well; otherwise `pip install -e .` reports that this is not a Python
+project. Check the files before installing:
+
+```bash
+cd /scratch/lbshks/super_animal
+ls -l pyproject.toml pipeline/main.py config/setup.json
+```
+
+If `pyproject.toml` is missing, transfer it from this repository and rerun the
+install command. An existing `.venv` does not need to be recreated. Use a
+cluster Python module or installation with Python 3.10 or newer and `venv`,
+then create the host environment in a persistent location:
 
 ```bash
 cd /scratch/lbshks/super_animal
