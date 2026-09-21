@@ -65,15 +65,19 @@ def video_output_folder(video: Path, video_root: str | Path,
     return Path(result_root).expanduser().resolve() / relative
 
 
-def has_existing_track(video: Path, destination: Path, video_adapt: bool = True) -> bool:
+def track_output_status(video: Path, destination: Path) -> tuple[bool, bool]:
+    """Report whether a video has nonempty HDF5 and adaptation artifacts."""
     h5 = any(path.stat().st_size > 0 for path in destination.glob(f"{video.stem}*.h5")
              if path.is_file())
-    if not video_adapt:
-        return h5
     adapted = any(path.stat().st_size > 0
                   for path in destination.glob(f"{video.stem}*_after_adapt.json")
                   if path.is_file())
-    return h5 and adapted
+    return h5, adapted
+
+
+def has_existing_track(video: Path, destination: Path, video_adapt: bool = True) -> bool:
+    h5, adapted = track_output_status(video, destination)
+    return h5 and (adapted or not video_adapt)
 
 
 def group_videos(videos: Iterable[Path], video_root: str | Path,

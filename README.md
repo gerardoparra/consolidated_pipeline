@@ -106,6 +106,12 @@ an error above `evaluation.threshold_px` reports a warning. Trial conversion
 requires five synchronized cameras, finished
 HDF5 tracks and adaptation reports, matching frame counts, and shared
 `x`/`y`/`likelihood` bodyparts. Incomplete trials are listed with a reason.
+If `convert` reports that 2D tracks are incomplete, check the sibling `tracks/`
+directory: every raw camera video in that trial needs a nonempty HDF5 track and
+a matching nonempty `*_after_adapt.json` report. A labeled preview video or
+`*_before_adapt` output alone is not a completed track. Check the saved job ID
+in `pipeline_state.json` and the Slurm logs to see whether inference is still
+running or failed, then rerun `convert` after the missing outputs are ready.
 
 For each cage, the stage folders are:
 

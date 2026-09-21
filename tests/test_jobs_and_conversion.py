@@ -76,6 +76,28 @@ class JobsAndConversionTests(unittest.TestCase):
         self.assertIn("No common", result.skipped_trials["CAGE1/20260811_102757_"])
         self.assertFalse((session / "CAGE1" / "pose-2d").exists())
 
+    def test_incomplete_tracks_name_missing_camera_artifacts(self):
+        session = self.root / "day1"
+        raw = session / "CAGE1" / "videos-raw"
+        tracks = session / "CAGE1" / "tracks"
+        raw.mkdir(parents=True)
+        tracks.mkdir()
+        cameras = list(self.setup["cages"]["CAGE1"])
+        for camera in cameras:
+            (raw / f"20260811_102757_{camera}.mkv").write_bytes(b"video")
+        (tracks / f"20260811_102757_{cameras[0]}_model.h5").write_bytes(b"track")
+        (tracks / f"20260811_102757_{cameras[1]}_after_adapt.json").write_text("{}")
+
+        result = convert_session(
+            session, self.setup["cages"], "mkv", self.setup["anipose"]["cam_regex"]
+        )
+
+        reason = result.skipped_trials["CAGE1/20260811_102757_"]
+        self.assertIn(f"{cameras[0]} (adaptation JSON)", reason)
+        self.assertIn(f"{cameras[1]} (HDF5)", reason)
+        self.assertIn(f"{cameras[2]} (HDF5, adaptation JSON)", reason)
+        self.assertFalse(result.ready_trials)
+
     def test_missing_anipose_tool_reports_preflight_error(self):
         self.setup["hosts"]["local"]["anipose_command"] = [str(self.root / "missing_anipose.exe")]
         processor = PoseProcessor(self.root, self.setup, environment="local")

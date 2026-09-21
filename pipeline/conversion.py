@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .pose_inference import has_existing_track
+from .pose_inference import track_output_status
 
 
 @dataclass
@@ -89,8 +89,21 @@ def convert_session(session_dir: str | Path, cage_maps: dict[str, dict[str, str]
             if camera_names != expected or len(videos) != len(expected):
                 result.skipped_trials[label] = f"Need cameras {sorted(expected)}; found {sorted(camera_names)}"
                 continue
-            if not all(has_existing_track(video, tracks) for video in videos):
-                result.skipped_trials[label] = "2D tracks are still incomplete"
+            missing_outputs = []
+            for video in videos:
+                h5, adapted = track_output_status(video, tracks)
+                missing = []
+                if not h5:
+                    missing.append("HDF5")
+                if not adapted:
+                    missing.append("adaptation JSON")
+                if missing:
+                    camera = f"camera{_camera_name(video, camera_pattern)}"
+                    missing_outputs.append(f"{camera} ({', '.join(missing)})")
+            if missing_outputs:
+                result.skipped_trials[label] = (
+                    "2D tracks are still incomplete; missing " + "; ".join(missing_outputs)
+                )
                 continue
             try:
                 sources = {video: _track_h5(video, tracks) for video in videos}
