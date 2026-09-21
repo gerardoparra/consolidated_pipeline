@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from pipeline.config import Setup
+from pipeline.config import Setup, hpc_repository_paths
 from pipeline.file_handler import FileHandler
 from pipeline.reprojection import _extract_leading_yymmdd, _extract_serial_token
 from pipeline.video_processor import VideoProcessor
@@ -33,7 +33,12 @@ class ConfigAndFilesTests(unittest.TestCase):
         self.assertEqual(config["calibration"]["board_size"], [10, 7])
         self.assertEqual(config["triangulation"]["cam_regex"], "camera([0-9][0-9])")
         self.assertEqual(json.loads(derived["cages"].read_text())["CAGE1"]["camera06"], "top")
-        self.assertIn("mlb2_experiment", json.loads(derived["jobs"].read_text()))
+        jobs = json.loads(derived["jobs"].read_text())
+        self.assertIn("mlb2_experiment", jobs)
+        self.assertEqual(
+            jobs["mlb2_experiment"]["wrapper"],
+            str(hpc_repository_paths(self.setup.data["hosts"]["hpc"])[2]),
+        )
         before = derived["anipose"].stat().st_mtime_ns
         self.setup.materialize(experiment, "local")
         self.assertEqual(before, derived["anipose"].stat().st_mtime_ns)

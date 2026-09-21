@@ -8,7 +8,7 @@
     },
     "hpc": {
       "experiment_dir": "/scratch/lbshks/mlb2/experiment",
-      "project_dir": "/scratch/lbshks/super_animal",
+      "repository_dir": "/scratch/lbshks/super_animal/consolidated_pipeline",
       "anipose_command": ["anipose"],
       "model_folder": "/scratch/lbshks/mlb2/models/superanimal_top-mlb2-2026-08-27",
       "sandbox": "/scratch/lbshks/super_animal/deeplabcut_sandbox",

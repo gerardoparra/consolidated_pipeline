@@ -10,7 +10,7 @@ fi
 VIDEO_ROOT=$1
 EXTENSION=$2
 RESULT_ROOT=$3
-: "${PIPELINE_PROJECT:?}"
+: "${PIPELINE_REPOSITORY:?}"
 : "${PIPELINE_SETUP:?}"
 : "${PIPELINE_SANDBOX:?}"
 : "${PIPELINE_CACHE:?}"
@@ -21,12 +21,12 @@ mkdir -p "$PIPELINE_CACHE/torch_cache" "$PIPELINE_CACHE/hf_cache" "$PIPELINE_TMP
 module load "$PIPELINE_MODULE"
 
 singularity exec --nv --containall \
-    --bind "$PIPELINE_PROJECT:$PIPELINE_PROJECT:ro" \
+    --bind "$PIPELINE_REPOSITORY:$PIPELINE_REPOSITORY:ro" \
     --bind "$VIDEO_ROOT:$VIDEO_ROOT" \
     --bind "$PIPELINE_CACHE:$PIPELINE_CACHE" \
     --bind "$PIPELINE_TMP:$PIPELINE_TMP" \
     "$PIPELINE_SANDBOX" \
-    env PYTHONPATH="$PIPELINE_PROJECT" \
+    env PYTHONPATH="$PIPELINE_REPOSITORY" \
         DLC_MODELZOO_PATH="$PIPELINE_CACHE/dlc_modelzoo" \
         TORCH_HOME="$PIPELINE_CACHE/torch_cache" \
         HF_HOME="$PIPELINE_CACHE/hf_cache" \

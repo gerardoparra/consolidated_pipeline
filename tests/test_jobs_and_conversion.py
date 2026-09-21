@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from pipeline.config import Setup
+from pipeline.config import Setup, hpc_repository_paths
 from pipeline.conversion import convert_session
 from pipeline.job_manager import JobManager
 from pipeline.pose_processor import PoseProcessor
@@ -25,7 +25,7 @@ class JobsAndConversionTests(unittest.TestCase):
 
     def test_submission_records_id_and_needs_explicit_retry(self):
         hpc_root = self.root / "hpc_experiment"
-        project = self.root / "project"
+        project = self.root / "super_animal" / "consolidated_pipeline"
         session = hpc_root / "day1"
         session.mkdir(parents=True)
         (project / "pipeline").mkdir(parents=True)
@@ -35,7 +35,7 @@ class JobsAndConversionTests(unittest.TestCase):
         sandbox = self.root / "dlc.sif"
         sandbox.write_bytes(b"container")
         self.setup["hosts"]["hpc"].update({
-            "experiment_dir": str(hpc_root), "project_dir": str(project),
+            "experiment_dir": str(hpc_root), "repository_dir": str(project),
             "sandbox": str(sandbox),
         })
         manager = JobManager(hpc_root, self.setup, session)
@@ -50,7 +50,24 @@ class JobsAndConversionTests(unittest.TestCase):
         self.assertEqual(retried.status, "submitted")
         self.assertEqual(run.call_count, 2)
         self.assertIn("day1", submitted.command)
+        command = manager.command()
+        repository, setup_json, wrapper = hpc_repository_paths(self.setup["hosts"]["hpc"])
+        self.assertEqual(command[command.index("--chdir") + 1], str(repository))
+        self.assertIn(str(wrapper), command)
+        exports = next(part for part in command if part.startswith("--export="))
+        self.assertIn(f"PIPELINE_REPOSITORY={repository}", exports)
+        self.assertIn(f"PIPELINE_SETUP={setup_json}", exports)
         self.assertTrue(manager.state_path.is_file())
+
+    def test_default_hpc_job_preview_keeps_linux_repository_paths(self):
+        setup = Setup.load(SETUP_PATH).data
+        command = JobManager(self.root, setup).command()
+        repository = setup["hosts"]["hpc"]["repository_dir"]
+        self.assertEqual(command[command.index("--chdir") + 1], repository)
+        self.assertIn(f"{repository}/pipeline/dlc_sbatch_superanimal.sh", command)
+        self.assertIn(f"PIPELINE_SETUP={repository}/config/setup.json", next(
+            part for part in command if part.startswith("--export=")
+        ))
 
     def test_incompatible_keypoints_skip_trial_without_staging_partial_pose(self):
         session = self.root / "day1"

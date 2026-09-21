@@ -8,7 +8,9 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from .config import hpc_repository_paths
 
 
 def _is_windows() -> bool:
@@ -46,14 +48,13 @@ class JobManager:
         hpc = self.setup["hosts"]["hpc"]
         pose = self.setup["pose"]
         slurm = self.setup["slurm"]
-        root = Path(hpc["experiment_dir"])
+        root = PurePosixPath(hpc["experiment_dir"])
         if self.session_dir:
             root /= self.session_dir.name
-        project = Path(hpc["project_dir"])
-        wrapper = project / "pipeline" / "dlc_sbatch_superanimal.sh"
+        repository, setup_json, wrapper = hpc_repository_paths(hpc)
         exports = ["ALL"] + [f"{key}={value}" for key, value in (
-            ("PIPELINE_PROJECT", project),
-            ("PIPELINE_SETUP", project / "config" / "setup.json"),
+            ("PIPELINE_REPOSITORY", repository),
+            ("PIPELINE_SETUP", setup_json),
             ("PIPELINE_SANDBOX", hpc["sandbox"]),
             ("PIPELINE_CACHE", hpc["cache_dir"]),
             ("PIPELINE_TMP", hpc["tmp_dir"]),
@@ -68,9 +69,9 @@ class JobManager:
             "--gres", slurm["gres"],
             "--constraint", slurm["constraint"],
             "--time", slurm["time"],
-            "--chdir", str(project),
-            "--output", str(project / "logs" / "submission-%x.%j.out"),
-            "--error", str(project / "logs" / "submission-%x.%j.err"),
+            "--chdir", str(repository),
+            "--output", str(repository / "logs" / "submission-%x.%j.out"),
+            "--error", str(repository / "logs" / "submission-%x.%j.err"),
             "--export=" + ",".join(exports),
             str(wrapper), str(root), pose["video_extension"], str(root),
         ]
@@ -89,15 +90,14 @@ class JobManager:
         if saved and not retry:
             return JobResult("pending", shlex.join(self.command()), saved)
         hpc = self.setup["hosts"]["hpc"]
-        project = Path(hpc["project_dir"])
+        repository, setup_json, wrapper = hpc_repository_paths(hpc)
         root = Path(hpc["experiment_dir"])
         if self.session_dir:
             root /= self.session_dir.name
-        wrapper = project / "pipeline" / "dlc_sbatch_superanimal.sh"
-        for path in (root, project, wrapper, project / "config" / "setup.json", Path(hpc["sandbox"])):
+        for path in (root, Path(repository), Path(wrapper), Path(setup_json), Path(hpc["sandbox"])):
             if not path.exists():
                 raise FileNotFoundError(f"HPC job dependency is missing: {path}")
-        (project / "logs").mkdir(parents=True, exist_ok=True)
+        Path(repository / "logs").mkdir(parents=True, exist_ok=True)
         try:
             completed = subprocess.run(self.command(), check=True, text=True, capture_output=True)
         except FileNotFoundError as exc:

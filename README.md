@@ -17,29 +17,22 @@ changes in `setup.json` so they survive the next run.
 
 ## Pipeline stages
 
-The `run` command advances through the automatic stages below in order. The
-calibration check is manual-only. `run` resumes from completed outputs, previews
-missing GPU work unless `--submit` is supplied, and can be run again after
-tracking finishes.
+The `run` command advances through the stages below in order. It resumes from
+completed outputs, previews missing GPU work unless `--submit` is supplied,
+and can be run again after tracking finishes.
 
 | Stage / CLI command | What it does | Main output |
 | --- | --- | --- |
 | Import and prepare / `prepare` | Extract a session zip, organize a raw folder, or accept a prepared session; sort calibration and behavioral videos into each cage. | `SESSION/CAGE*/calibration/` and `videos-raw/` |
 | Downsample / `downsample` | Sample each calibration video at a synchronized low frame rate for Anipose. The MLB2 default is 3 FPS. | Calibration `.avi` files |
 | Camera calibration / `calibrate` | Use the ChArUco-board videos to estimate the five cameras' geometry for each cage. | `calibration/calibration.toml` |
-| Calibration check / `labels`, `evaluate` (manual only) | Extract frames for manual labeling, then triangulate manually labeled keypoints with the calibration and reproject them into the camera views. Report mean pixel error as a sanity check; a warning does not stop tracking. | Reprojection summary CSV and figures |
 | 2D tracking / `pose` | Run SuperAnimal on the raw behavioral videos with the configured top-view or quadruped model. On HPC, preview or submit a GPU Slurm job. | Sibling `tracks/` HDF5 files and adaptation reports |
 | Convert tracks / `convert` | Group synchronized five-camera trials, verify matching frames and shared keypoints, and write Anipose-compatible 2D tracks. | `pose-2d/` HDF5 files |
 | 3D pose / `triangulate` | Use Anipose and the saved camera calibration to triangulate complete 2D trials. | `pose-3d/` trial CSV files |
 
-The optional calibration check uses triangulation only to test camera geometry;
-the final 3D pose stage triangulates SuperAnimal tracks from the behavioral
-videos. Calibration and its manual-label check are implemented in
-`CalibrationProcessor`; tracking, conversion, and final triangulation are in
-`PoseProcessor`. The `prepare` command also performs downsampling; the separate
-`downsample` command resumes that step for an organized session. Run `evaluate`
-manually after calibration whenever labeled camera frames are available; the
-full `run` command does not invoke it, even when label paths are configured.
+The `prepare` command also performs downsampling; the separate `downsample`
+command resumes that step for an organized session. The optional manual-label
+calibration check is described under **Additional commands**.
 
 ## Run one session
 
@@ -55,11 +48,15 @@ triangulates any trials whose tracks are already complete. It does not perform
 the manual-label calibration check. After the Slurm job finishes, invoke the
 same command again to advance the remaining trials.
 
-On HPC, place this repository at `/scratch/lbshks/super_animal`, activate the
-host environment described below, and run from a CPU allocation:
+On HPC, clone this repository inside `/scratch/lbshks/super_animal` so that
+`pyproject.toml` is at the configured `hosts.hpc.repository_dir` (currently
+`/scratch/lbshks/super_animal/consolidated_pipeline`). Activate the host
+environment described below before running from a CPU allocation:
 
 ```bash
-python3 -m pipeline.main run /scratch/lbshks/mlb2/experiment/SESSION_NAME --environment hpc --submit
+cd /scratch/lbshks/super_animal/consolidated_pipeline
+source /scratch/lbshks/super_animal/.venv/bin/activate
+python -m pipeline.main run /scratch/lbshks/mlb2/experiment/SESSION_NAME --environment hpc --submit
 ```
 
 `--submit` is required for Slurm submission. Jobs are scoped to the selected
@@ -83,7 +80,15 @@ result = run_pose_detection_pipeline(
 print(result.status, result.pending_videos, result.triangulation.outputs)
 ```
 
-## Run individual stages
+## Additional commands
+
+The full `run` command handles the core stages. Use these commands to run or
+resume one stage independently. On HPC, activate the host environment first:
+
+```bash
+cd /scratch/lbshks/super_animal/consolidated_pipeline
+source /scratch/lbshks/super_animal/.venv/bin/activate
+```
 
 Every command accepts `--config`, `--environment`, and `--experiment-dir`:
 
@@ -91,20 +96,29 @@ Every command accepts `--config`, `--environment`, and `--experiment-dir`:
 python -m pipeline.main prepare ZIP_OR_FOLDER
 python -m pipeline.main downsample SESSION_DIR
 python -m pipeline.main calibrate SESSION_DIR
-python -m pipeline.main labels SESSION_DIR --frame-index 100
-python -m pipeline.main evaluate SESSION_DIR --labels LABEL_CSV_DIR
 python -m pipeline.main pose SESSION_DIR            # preview
 python -m pipeline.main pose SESSION_DIR --submit   # HPC only
 python -m pipeline.main convert SESSION_DIR
 python -m pipeline.main triangulate SESSION_DIR
 ```
 
+The manual calibration check is separate from the default run. After
+calibration, extract frames for labeling and evaluate the resulting CSVs when
+you want to check reprojection error:
+
+```text
+python -m pipeline.main labels SESSION_DIR --frame-index 100
+python -m pipeline.main evaluate SESSION_DIR --labels LABEL_CSV_DIR
+```
+
 `labels` writes frames to the configured DLC project for manual labeling.
 `evaluate` runs only when explicitly requested. It uses
 `evaluation.label_csv_root` or its `--labels` argument to locate manual labels;
-an error above `evaluation.threshold_px` reports a warning. Trial conversion
-requires five synchronized cameras, finished
-HDF5 tracks and adaptation reports, matching frame counts, and shared
+an error above `evaluation.threshold_px` reports a warning. This check
+triangulates manually labeled points only to test camera geometry; the core 3D
+stage triangulates SuperAnimal tracks from behavioral videos. Trial conversion
+requires five synchronized cameras, finished HDF5 tracks and adaptation
+reports, matching frame counts, and shared
 `x`/`y`/`likelihood` bodyparts. Incomplete trials are listed with a reason.
 If `convert` reports that 2D tracks are incomplete, check the sibling `tracks/`
 directory: every raw camera video in that trial needs a nonempty HDF5 track and
@@ -139,35 +153,42 @@ The current `run` command performs preparation and calibration in the shell
 that invokes it, so use a CPU allocation for a full session rather than doing
 that work on the login node. The GPU worker is submitted separately by `--submit`.
 
-First, copy the whole repository to the `hosts.hpc.project_dir` in
-`config/setup.json` (currently `/scratch/lbshks/super_animal`). This must include
-`pyproject.toml` at the project root, alongside `pipeline/` and `config/`.
-Earlier deployments that copied only those two directories need the manifest
-copied as well; otherwise `pip install -e .` reports that this is not a Python
-project. Check the files before installing:
+First, clone the whole repository at the `hosts.hpc.repository_dir` in
+`config/setup.json` (currently
+`/scratch/lbshks/super_animal/consolidated_pipeline`). This must include
+`pyproject.toml` at the repository root, alongside `pipeline/` and `config/`.
+If the clone has a different name or location, edit `hosts.hpc.repository_dir`
+before submitting a Slurm job. The job manager derives the wrapper script,
+worker setup file, working directory, and log paths from that setting; the
+sandbox, cache, and temp paths remain separate settings. Earlier deployments
+that copied only `pipeline/` and `config/` need the manifest too, or
+`pip install -e .` reports that this is not a Python project. Check the files
+before installing:
 
 ```bash
-cd /scratch/lbshks/super_animal
+cd /scratch/lbshks/super_animal/consolidated_pipeline
 ls -l pyproject.toml pipeline/main.py config/setup.json
 ```
 
 If `pyproject.toml` is missing, transfer it from this repository and rerun the
-install command. An existing `.venv` does not need to be recreated. Use a
-cluster Python module or installation with Python 3.10 or newer and `venv`,
-then create the host environment in a persistent location:
+install command. Keep an existing `/scratch/lbshks/super_animal/.venv`; it does
+not need to be recreated after cloning the repository. Use a cluster Python
+module or installation with Python 3.10 or newer and `venv`. Create the host
+environment alongside the checkout only if it does not already exist, then
+activate it and install the package from the repository:
 
 ```bash
-cd /scratch/lbshks/super_animal
-python3 -m venv .venv
-source .venv/bin/activate
+cd /scratch/lbshks/super_animal/consolidated_pipeline
+python3 -m venv /scratch/lbshks/super_animal/.venv  # skip if it already exists
+source /scratch/lbshks/super_animal/.venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e . anipose
 # Only if using the optional manual-label reprojection check:
 python -m pip install -e '.[validation]'
 ```
 
-Activate `.venv` in every shell or CPU job that runs the CLI. The configured
-HPC `anipose_command` is `anipose`, so that executable must be on `PATH` in
+Activate the host `.venv` in every shell or CPU job that runs the CLI. The
+configured HPC `anipose_command` is `anipose`, so it must be on `PATH` in
 the activated environment. Anipose's [installation guide](https://anipose.readthedocs.io/en/latest/installation.html)
 also uses `pip install anipose`. Check imports and the CLI before processing a
 session; this catches broken NumPy installations and missing ChArUco support:
@@ -198,7 +219,7 @@ for its current GPU/PyTorch instructions and the
 On a GPU allocation, check the exact import the worker uses:
 
 ```bash
-cd /scratch/lbshks/super_animal
+cd /scratch/lbshks/super_animal/consolidated_pipeline
 module load singularity
 singularity exec --nv --containall --bind "$PWD:$PWD:ro" \
   /scratch/lbshks/super_animal/deeplabcut_sandbox \

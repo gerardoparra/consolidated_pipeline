@@ -6,7 +6,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -31,6 +31,16 @@ def _write_if_changed(path: Path, content: str) -> Path:
     if not path.exists() or path.read_text(encoding="utf-8") != content:
         path.write_text(content, encoding="utf-8")
     return path
+
+
+def hpc_repository_paths(hpc: dict[str, Any]) -> tuple[PurePosixPath, PurePosixPath, PurePosixPath]:
+    """Return the configured checkout, setup file, and Slurm worker script."""
+    repository = PurePosixPath(hpc["repository_dir"])
+    return (
+        repository,
+        repository / "config" / "setup.json",
+        repository / "pipeline" / "dlc_sbatch_superanimal.sh",
+    )
 
 
 @dataclass(frozen=True)
@@ -61,7 +71,7 @@ class Setup:
                     raise ValueError(f"hosts.{host_name}.{key} is required")
             if not isinstance(host["anipose_command"], list):
                 raise ValueError(f"hosts.{host_name}.anipose_command must be a list")
-        for key in ("project_dir", "sandbox", "cache_dir", "tmp_dir", "singularity_module"):
+        for key in ("repository_dir", "sandbox", "cache_dir", "tmp_dir", "singularity_module"):
             if not data["hosts"]["hpc"].get(key):
                 raise ValueError(f"hosts.hpc.{key} is required")
         perspectives = {"top", "front", "side", "left", "right", "back"}
@@ -137,13 +147,16 @@ class Setup:
             root / "cage_map.json", json.dumps(self.data["cages"], indent=2) + "\n"
         )
         hpc = self.host("hpc")
-        video_root = Path(hpc["experiment_dir"]) / session_name if session_name else Path(hpc["experiment_dir"])
+        _, _, wrapper = hpc_repository_paths(hpc)
+        video_root = PurePosixPath(hpc["experiment_dir"])
+        if session_name:
+            video_root /= session_name
         jobs = {"mlb2_experiment": {
             "video_root": str(video_root),
             "extension": self.data["pose"]["video_extension"],
             "result_root": str(video_root),
-            "cage_map_file": str(Path(hpc["experiment_dir"]) / "cage_map.json"),
-            "wrapper": str(Path(hpc["project_dir"]) / "pipeline" / "dlc_sbatch_superanimal.sh"),
+            "cage_map_file": str(PurePosixPath(hpc["experiment_dir"]) / "cage_map.json"),
+            "wrapper": str(wrapper),
             "job_name": self.data["slurm"]["job_name"],
             "experiment_layout": True,
             "skip_existing": self.data["pose"]["skip_existing"],
