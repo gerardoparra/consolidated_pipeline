@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,8 +6,9 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from pipeline.calibration_processor import CalibrationProcessor
 from pipeline.config import Setup
-from pipeline.main import run_pose_detection_pipeline
+from pipeline.main import build_parser, run_pose_detection_pipeline
 from pipeline.pose_processor import PoseProcessor
 
 
@@ -57,6 +59,24 @@ class OrchestrationTests(unittest.TestCase):
         self.assertIn(session.name, result.job.command)
         self.assertEqual(again.status, "pending_pose")
 
+    def test_run_skips_manual_evaluation_even_with_configured_labels(self):
+        session = prepared_session(self.root)
+        labels = self.root / "labels" / session.name
+        labels.mkdir(parents=True)
+        (labels / "manual.csv").write_text("placeholder", encoding="utf-8")
+        setup_data = json.loads(SETUP_PATH.read_text(encoding="utf-8"))
+        setup_data["evaluation"]["label_csv_root"] = str(labels.parent)
+        setup_path = self.root / "setup.json"
+        setup_path.write_text(json.dumps(setup_data), encoding="utf-8")
+
+        with patch.object(CalibrationProcessor, "evaluate", side_effect=AssertionError("manual-only")):
+            result = run_pose_detection_pipeline(session, self.root, setup_path)
+
+        self.assertEqual(result.status, "pending_pose")
+        self.assertFalse(hasattr(result, "evaluation"))
+        args = build_parser().parse_args(["evaluate", str(session), "--labels", str(labels)])
+        self.assertEqual(args.labels, labels)
+
     def test_ready_trial_converts_then_triangulates_while_other_cage_waits(self):
         session = prepared_session(self.root, tracks_for_cage1=True)
         actions = []
@@ -92,10 +112,26 @@ class OrchestrationTests(unittest.TestCase):
             self.assertEqual(action, "calibrate")
             (calibration / "calibration.toml").write_text("done")
 
-        with patch.object(PoseProcessor, "_run_anipose", make_calibration):
-            result = PoseProcessor(self.root, Setup.load(SETUP_PATH).data).calibrate_cameras(session)
+        with patch.object(CalibrationProcessor, "_run_anipose", make_calibration):
+            result = CalibrationProcessor(self.root, Setup.load(SETUP_PATH).data).calibrate_cameras(session)
         self.assertEqual(len(result.tomls), 1)
         self.assertIn("CAGE2", result.skipped_cages)
+
+    def test_manual_label_reprojection_warns_on_high_calibration_error(self):
+        session = prepared_session(self.root)
+        labels = self.root / "labels"
+        labels.mkdir()
+        (labels / "manual.csv").write_text("placeholder", encoding="utf-8")
+        calibration_tomls = [session / "CAGE1" / "calibration" / "calibration.toml"]
+        summary = pd.DataFrame({"mean_reprojection_error_px": [8.0]})
+
+        with patch("pipeline.reprojection.run_reprojection_batch", return_value=(summary, None)):
+            result = CalibrationProcessor(self.root, Setup.load(SETUP_PATH).data).evaluate(
+                session, calibration_tomls, labels
+            )
+
+        self.assertEqual(result.status, "warning")
+        self.assertEqual(result.mean_error_px, 8.0)
 
 
 if __name__ == "__main__":

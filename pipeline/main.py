@@ -6,11 +6,12 @@ import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .calibration_processor import CalibrationProcessor, CalibrationResult
 from .config import Setup
 from .conversion import ConversionResult
 from .file_handler import FileHandler
 from .job_manager import JobManager, JobResult
-from .pose_processor import CalibrationResult, EvaluationResult, PoseProcessor, TriangulationResult
+from .pose_processor import PoseProcessor, TriangulationResult
 from .video_processor import VideoProcessor
 
 
@@ -22,7 +23,6 @@ class PipelineRunResult:
     status: str
     session_dir: Path
     calibration: CalibrationResult
-    evaluation: EvaluationResult
     job: JobResult | None = None
     conversion: ConversionResult = field(default_factory=ConversionResult)
     triangulation: TriangulationResult = field(default_factory=TriangulationResult)
@@ -36,25 +36,25 @@ def run_pose_detection_pipeline(
     *,
     submit_jobs: bool = False,
     environment: str = "auto",
-    label_csv_folder: str | Path | None = None,
 ) -> PipelineRunResult:
     """Advance one session as far as completed outputs and requested jobs allow.
 
     Preview is the default for Slurm. Reinvoke after the job finishes to convert
-    2D tracks and triangulate complete trials.
+    2D tracks and triangulate complete trials. Manual-label calibration evaluation
+    is available only through the separate ``evaluate`` command.
     """
     setup = Setup.load(setup_json)
     root = setup.experiment_dir(environment, experiment_dir)
     file_handler = FileHandler(root, setup.data)
     video_processor = VideoProcessor(root, setup.data)
+    calibration_processor = CalibrationProcessor(root, setup.data, environment=setup.host_name(environment))
     pose_processor = PoseProcessor(root, setup.data, environment=setup.host_name(environment))
     session = file_handler.import_raw_data(source_path)
     job_manager = JobManager(root, setup.data, session)
     video_processor.prepare(session)
     video_processor.downsample(session)
     setup.materialize(root, environment, session.name)
-    calibration = pose_processor.calibrate_cameras(session)
-    evaluation = pose_processor.evaluate(session, calibration.tomls, label_csv_folder)
+    calibration = calibration_processor.calibrate_cameras(session)
 
     pending = file_handler.pending_tracks(session)
     job = None
@@ -71,7 +71,7 @@ def run_pose_detection_pipeline(
     else:
         status = "complete"
     return PipelineRunResult(
-        status, session, calibration, evaluation, job, conversion, triangulation, pending
+        status, session, calibration, job, conversion, triangulation, pending
     )
 
 
@@ -107,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--submit", action="store_true", help="Submit Slurm job on HPC")
         if name == "pose":
             sub.add_argument("--retry-job", action="store_true", help="Submit again despite saved job ID")
-        if name in {"run", "evaluate"}:
+        if name == "evaluate":
             sub.add_argument("--labels", type=Path, help="Manual label CSV directory")
         if name == "labels":
             sub.add_argument("--frame-index", type=int, default=100)
@@ -131,12 +131,9 @@ def main(argv: list[str] | None = None) -> None:
         result = run_pose_detection_pipeline(
             args.source, args.experiment_dir, args.config,
             submit_jobs=args.submit, environment=args.environment,
-            label_csv_folder=args.labels,
         )
         print(f"{result.status}: {result.session_dir}")
-        print(f"Camera calibrations: {len(result.calibration.tomls)}; quality: {result.evaluation.status}")
-        if result.evaluation.mean_error_px is not None:
-            print(f"Mean reprojection error: {result.evaluation.mean_error_px:.3f}px")
+        print(f"Camera calibrations: {len(result.calibration.tomls)}")
         if result.job:
             print(f"Slurm {result.job.status}: {result.job.command}")
             if result.job.job_id:
@@ -156,6 +153,7 @@ def main(argv: list[str] | None = None) -> None:
     root = setup.experiment_dir(args.environment, args.experiment_dir)
     files = FileHandler(root, setup.data)
     video = VideoProcessor(root, setup.data)
+    calibration = CalibrationProcessor(root, setup.data, environment=setup.host_name(args.environment))
     pose = PoseProcessor(root, setup.data, environment=setup.host_name(args.environment))
     if args.command == "prepare":
         session = files.import_raw_data(args.source)
@@ -173,7 +171,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command != "labels":
         setup.materialize(root, args.environment, session.name)
     if args.command == "calibrate":
-        result = pose.calibrate_cameras(session)
+        result = calibration.calibrate_cameras(session)
         print(f"Camera calibrations: {len(result.tomls)}")
         for cage, reason in result.skipped_cages.items():
             print(f"[skip] {cage}: {reason}")
@@ -183,7 +181,7 @@ def main(argv: list[str] | None = None) -> None:
         outputs = extract_frame(project, files.raw_videos(session), args.frame_index)
         print(f"Manual label frame folders: {len(outputs)}")
     elif args.command == "evaluate":
-        result = pose.evaluate(session, files.calibration_tomls(session), args.labels)
+        result = calibration.evaluate(session, files.calibration_tomls(session), args.labels)
         print(f"Quality: {result.status}; mean error: {result.mean_error_px}; summary: {result.summary_csv}")
     elif args.command == "pose":
         pending = files.pending_tracks(session)
