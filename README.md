@@ -29,8 +29,8 @@ error if manual label CSVs are configured, and converts and triangulates any
 trials whose tracks are already complete. After the Slurm job finishes, invoke
 the same command again to advance the remaining trials.
 
-On the HPC login node, place `pipeline/` and `config/` directly under
-`/scratch/lbshks/super_animal`, then run:
+On HPC, place this repository at `/scratch/lbshks/super_animal`, activate the
+host environment described below, and run from a CPU allocation:
 
 ```bash
 python3 -m pipeline.main run /scratch/lbshks/mlb2/experiment/SESSION_NAME --environment hpc --submit
@@ -96,14 +96,83 @@ mechanical- and sliding-lockbox behavior. For the current MLB2 setup, the raw
 video extension is `.mkv`, the calibration extension is `.avi`, and `CAGE1` and
 `CAGE2` each map five cameras to top or lateral SuperAnimal models.
 
-## Environments and verification
+## Install dependencies on HPC
+
+There are two Python environments. Preparation, calibration, conversion, and
+triangulation use a **host Python environment** with this package and Anipose.
+The GPU Slurm worker uses Python **inside the Singularity sandbox**; installing
+DeepLabCut only in the host environment will not make it available to the worker.
+The current `run` command performs preparation and calibration in the shell
+that invokes it, so use a CPU allocation for a full session rather than doing
+that work on the login node. The GPU worker is submitted separately by `--submit`.
+
+First, copy the whole repository to the `hosts.hpc.project_dir` in
+`config/setup.json` (currently `/scratch/lbshks/super_animal`). Use a cluster
+Python module or installation with Python 3.10 or newer and `venv`, then create
+the host environment in a persistent location:
+
+```bash
+cd /scratch/lbshks/super_animal
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e . anipose
+# Only if using the optional manual-label reprojection check:
+python -m pip install -e '.[validation]'
+```
+
+Activate `.venv` in every shell or CPU job that runs the CLI. The configured
+HPC `anipose_command` is `anipose`, so that executable must be on `PATH` in
+the activated environment. Anipose's [installation guide](https://anipose.readthedocs.io/en/latest/installation.html)
+also uses `pip install anipose`. Check imports and the CLI before processing a
+session; this catches broken NumPy installations and missing ChArUco support:
+
+```bash
+python -c "import numpy, pandas, tables, cv2; assert hasattr(cv2, 'aruco')"
+anipose --help
+python -m pip check
+```
+
+The worker script loads the configured `singularity` module and executes
+`hosts.hpc.sandbox` (currently `deeplabcut_sandbox`) with `--nv`. That sandbox
+must have Python 3.10+, a GPU-compatible PyTorch installation, DeepLabCut with
+SuperAnimal/Model Zoo support, and the package runtime dependencies (`numpy`,
+`pandas`, `tables`, and `opencv-contrib-python`). When building or updating a
+**writable** sandbox, install those Python packages inside it, using the
+container's Python and a PyTorch build compatible with the cluster driver:
+
+```bash
+python3 -m pip install 'deeplabcut[gui,modelzoo]' numpy pandas tables opencv-contrib-python
+```
+
+Run that installation command in the sandbox build environment, not in the
+host `.venv`. If the existing sandbox is already provisioned, verify it instead
+of reinstalling. See the [DeepLabCut installation guide](https://deeplabcut.github.io/DeepLabCut/docs/installation.html)
+for its current GPU/PyTorch instructions and the
+[Apptainer GPU guide](https://apptainer.org/docs/user/main/gpu.html) for `--nv`.
+On a GPU allocation, check the exact import the worker uses:
+
+```bash
+cd /scratch/lbshks/super_animal
+module load singularity
+singularity exec --nv --containall --bind "$PWD:$PWD:ro" \
+  /scratch/lbshks/super_animal/deeplabcut_sandbox \
+  env PYTHONPATH="$PWD" python3 -c \
+  'import cv2, numpy, pandas, tables, torch; from deeplabcut.modelzoo.video_inference import video_inference_superanimal; assert torch.cuda.is_available()'
+```
+
+Finally, confirm that `sbatch`, the configured Singularity module and sandbox,
+the model directory, and writable experiment/cache/temp paths exist. The
+worker writes its logs under the project directory. SuperAnimal model weights
+may download on first use, so the configured cache must also be usable from a
+compute node. Transfer session data to HPC storage separately; the pipeline
+does not copy it between hosts.
+
+## Verification
 
 The local setup invokes Anipose through `conda run -n anipose`, which supplies
-the environment's required DLL paths. The Python environment running this
-package needs the dependencies in `pyproject.toml`; reprojection evaluation also
-needs the `validation` extra. The Slurm worker runs DeepLabCut inside the
-configured Singularity sandbox. On HPC, make the worker script readable by
-Slurm and ensure the configured module, sandbox, cache, and project paths exist.
+the environment's required DLL paths. On HPC, the commands above verify the
+separate host and worker environments before running a session.
 
 ```text
 python -m unittest discover -s tests -v
