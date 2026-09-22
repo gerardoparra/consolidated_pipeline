@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from pipeline.config import Setup, hpc_repository_paths
-from pipeline.conversion import convert_session
+from pipeline.conversion import _track_h5, convert_session
 from pipeline.job_manager import JobManager
 from pipeline.pose_processor import PoseProcessor
 
@@ -85,13 +85,34 @@ class JobsAndConversionTests(unittest.TestCase):
             pd.DataFrame([[1.0, 2.0, 0.9]], columns=columns).to_hdf(
                 tracks / f"{video.stem}DLC_model.h5", key="df"
             )
-            (tracks / f"{video.stem}_after_adapt.json").write_text("{}")
+            (tracks / f"{video.stem}DLC_model_after_adapt.json").write_text("{}")
         result = convert_session(
             session, self.setup["cages"], "mkv", self.setup["anipose"]["cam_regex"]
         )
         self.assertFalse(result.ready_trials)
         self.assertIn("No common", result.skipped_trials["CAGE1/20260811_102757_"])
         self.assertFalse((session / "CAGE1" / "pose-2d").exists())
+
+    def test_selects_h5_paired_with_after_adaptation_report(self):
+        raw = self.root / "day1" / "CAGE1" / "videos-raw"
+        tracks = raw.parent / "tracks"
+        raw.mkdir(parents=True)
+        tracks.mkdir()
+        video = raw / "20260803_113206_camera04.mkv"
+        video.write_bytes(b"video")
+        initial = tracks / (
+            f"{video.stem}_superanimal_topviewmouse_"
+            "fasterrcnn_resnet50_fpn_v2_hrnet_w32.h5"
+        )
+        adapted = tracks / (
+            f"{video.stem}_superanimal_topviewmouse_"
+            "snapshot-fasterrcnn_resnet50_fpn_v2-004_snapshot-hrnet_w32-004.h5"
+        )
+        initial.write_bytes(b"initial")
+        adapted.write_bytes(b"adapted")
+        adapted.with_name(adapted.stem + "_after_adapt.json").write_text("{}")
+
+        self.assertEqual(_track_h5(video, tracks), adapted)
 
     def test_incomplete_tracks_name_missing_camera_artifacts(self):
         session = self.root / "day1"

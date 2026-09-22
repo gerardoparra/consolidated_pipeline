@@ -36,7 +36,7 @@ def prepared_session(root: Path, *, tracks_for_cage1: bool = False) -> Path:
                 )
                 frame = pd.DataFrame([[1.0] * len(columns), [2.0] * len(columns)], columns=columns)
                 frame.to_hdf(tracks / f"{video.stem}DLC_model.h5", key="df")
-                (tracks / f"{video.stem}_after_adapt.json").write_text("{}")
+                (tracks / f"{video.stem}DLC_model_after_adapt.json").write_text("{}")
     return session
 
 

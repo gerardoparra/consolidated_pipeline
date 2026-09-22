@@ -85,7 +85,7 @@ class PoseWorkerTests(unittest.TestCase):
                     def fake_superanimal(videos, _model, **kwargs):
                         self.assertEqual(videos, [str(video)])
                         (tracks / f"{stem}DLC_model.h5").write_bytes(b"track")
-                        (tracks / f"{stem}_after_adapt.json").write_text("{}")
+                        (tracks / f"{stem}DLC_model_after_adapt.json").write_text("{}")
                         for path in (labeled, before, unrelated, other_camera):
                             path.write_bytes(b"preview")
 
@@ -106,7 +106,7 @@ class PoseWorkerTests(unittest.TestCase):
                     self.assertTrue(other_camera.exists())
                     self.assertEqual(video.read_bytes(), b"raw video")
                     self.assertTrue((tracks / f"{stem}DLC_model.h5").exists())
-                    self.assertTrue((tracks / f"{stem}_after_adapt.json").exists())
+                    self.assertTrue((tracks / f"{stem}DLC_model_after_adapt.json").exists())
 
     def test_cleanup_skips_incomplete_tracks_and_handles_older_dlc_signature(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -126,7 +126,7 @@ class PoseWorkerTests(unittest.TestCase):
                                    scale_list, dest_folder, max_individuals):
                 if videos == [str(complete_video)]:
                     (complete_labeled.parent / f"{complete_video.stem}DLC_model.h5").write_bytes(b"track")
-                    (complete_labeled.parent / f"{complete_video.stem}_after_adapt.json").write_text("{}")
+                    (complete_labeled.parent / f"{complete_video.stem}DLC_model_after_adapt.json").write_text("{}")
                     complete_labeled.write_bytes(b"preview")
                 else:
                     labeled.write_bytes(b"preview")
@@ -153,7 +153,7 @@ class PoseWorkerTests(unittest.TestCase):
             tracks = raw.parent / "tracks"
             tracks.mkdir()
             (tracks / f"{video.stem}DLC_model.h5").write_bytes(b"track")
-            (tracks / f"{video.stem}_after_adapt.json").write_text("{}")
+            (tracks / f"{video.stem}DLC_model_after_adapt.json").write_text("{}")
             labeled = tracks / f"{video.stem}_superanimal_labeled.mp4"
             labeled.write_bytes(b"preview")
             inference_module = types.ModuleType("deeplabcut.modelzoo.video_inference")

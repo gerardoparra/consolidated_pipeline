@@ -140,6 +140,13 @@ a matching nonempty `*_after_adapt.json` report. A labeled preview video or
 in `pipeline_state.json` and the Slurm logs to see whether inference is still
 running or failed, then rerun `convert` after the missing outputs are ready.
 
+With video adaptation enabled, two HDF5 files per raw video are expected. The
+shorter pretrained-model filename contains the initial predictions used to make
+pseudo-labels; the filename containing `snapshot-...` contains predictions from
+the adapted detector and pose checkpoints. DeepLabCut adds `_after_adapt` to the
+adapted JSON report but not to its HDF5 filename. Conversion pairs that report
+with the same filename prefix and uses the corresponding adapted HDF5 file.
+
 For each cage, the stage folders are:
 
 ```text

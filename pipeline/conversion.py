@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .pose_inference import track_output_status
+from .pose_inference import adapted_track_h5s, track_output_status
 
 
 @dataclass
@@ -32,15 +32,17 @@ def _camera_name(video: Path, camera_pattern: str) -> str:
 
 
 def _track_h5(video: Path, destination: Path) -> Path:
-    candidates = sorted(destination.glob(f"{video.stem}*.h5"))
-    if not candidates:
-        raise FileNotFoundError(f"No SuperAnimal HDF5 track for {video.name}")
+    candidates = adapted_track_h5s(video, destination)
     if len(candidates) == 1:
         return candidates[0]
-    adapted = [path for path in candidates if "after_adapt" in path.stem]
-    if len(adapted) == 1:
-        return adapted[0]
-    raise ValueError(f"Multiple HDF5 tracks for {video.name}: {', '.join(p.name for p in candidates)}")
+    if not candidates:
+        raise FileNotFoundError(
+            f"No HDF5 track matching an after-adaptation JSON for {video.name}"
+        )
+    raise ValueError(
+        f"Multiple completed after-adaptation HDF5 tracks for {video.name}: "
+        + ", ".join(path.name for path in candidates)
+    )
 
 
 def normalize_superanimal_h5(source: Path) -> pd.DataFrame:

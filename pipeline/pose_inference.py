@@ -76,9 +76,24 @@ def track_output_status(video: Path, destination: Path) -> tuple[bool, bool]:
     return h5, adapted
 
 
+def adapted_track_h5s(video: Path, destination: Path) -> list[Path]:
+    """Return nonempty HDF5 tracks paired with nonempty after-adaptation JSON files."""
+    suffix = "_after_adapt.json"
+    matches: list[Path] = []
+    for report in destination.glob(f"{video.stem}*{suffix}"):
+        if not report.is_file() or report.stat().st_size == 0:
+            continue
+        track = report.with_name(report.name[:-len(suffix)] + ".h5")
+        if track.is_file() and track.stat().st_size > 0:
+            matches.append(track)
+    return sorted(set(matches))
+
+
 def has_existing_track(video: Path, destination: Path, video_adapt: bool = True) -> bool:
-    h5, adapted = track_output_status(video, destination)
-    return h5 and (adapted or not video_adapt)
+    if video_adapt:
+        return bool(adapted_track_h5s(video, destination))
+    h5, _ = track_output_status(video, destination)
+    return h5
 
 
 def delete_completed_labeled_videos(video: Path, destination: Path) -> int:
