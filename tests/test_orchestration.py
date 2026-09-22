@@ -1,6 +1,8 @@
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,7 +10,12 @@ import pandas as pd
 
 from pipeline.calibration_processor import CalibrationProcessor
 from pipeline.config import Setup
-from pipeline.main import build_parser, run_pose_detection_pipeline
+from pipeline.main import (
+    _print_triangulation_issues,
+    build_parser,
+    run_pose_detection_pipeline,
+)
+from pipeline.pose_processor import TriangulationResult
 from pipeline.pose_processor import PoseProcessor
 
 
@@ -111,6 +118,17 @@ class OrchestrationTests(unittest.TestCase):
         self.assertFalse(result.outputs)
         self.assertEqual(result.anipose_output, diagnostic)
         self.assertIn("CAGE1/20260811_102757_", result.skipped_trials)
+
+    def test_standalone_triangulation_output_includes_anipose_diagnostic(self):
+        result = TriangulationResult(
+            skipped_trials={"CAGE2/trial": "Anipose did not create a 3D CSV"},
+            anipose_output="ValueError: camera names do not match",
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            _print_triangulation_issues(result)
+        self.assertIn("[skip] CAGE2/trial", output.getvalue())
+        self.assertIn("Anipose output:\nValueError", output.getvalue())
 
     def test_calibration_handoff_reports_missing_cage(self):
         session = self.root / "session"

@@ -29,6 +29,14 @@ class PipelineRunResult:
     pending_videos: list[Path] = field(default_factory=list)
 
 
+def _print_triangulation_issues(result: TriangulationResult) -> None:
+    """Print skipped trials and any diagnostics captured from Anipose."""
+    for trial, reason in sorted(result.skipped_trials.items()):
+        print(f"[skip] {trial}: {reason}")
+    if result.anipose_output and result.skipped_trials:
+        print("Anipose output:\n" + result.anipose_output)
+
+
 def run_pose_detection_pipeline(
     source_path: str | Path,
     experiment_dir: str | Path | None,
@@ -139,10 +147,7 @@ def main(argv: list[str] | None = None) -> None:
             if result.job.job_id:
                 print(f"Job ID: {result.job.job_id}")
         print(f"2D videos pending: {len(result.pending_videos)}; 3D trials: {len(result.triangulation.outputs)}")
-        for trial, reason in sorted(result.triangulation.skipped_trials.items()):
-            print(f"[skip] {trial}: {reason}")
-        if result.triangulation.anipose_output and result.triangulation.skipped_trials:
-            print("Anipose output:\n" + result.triangulation.anipose_output)
+        _print_triangulation_issues(result.triangulation)
         return
 
     setup = Setup.load(args.config)
@@ -200,14 +205,11 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Converted {len(result.converted)} files; ready trials: {len(result.ready_trials)}")
         for trial, reason in sorted(result.skipped_trials.items()):
             print(f"[skip] {trial}: {reason}")
-        if result.anipose_output and result.skipped_trials:
-            print("Anipose output:\n" + result.anipose_output)
     elif args.command == "triangulate":
         converted = pose.convert_dlc_output_to_anipose(session)
         result = pose.triangulate(session, converted)
         print(f"3D CSVs: {len(result.outputs)}")
-        for trial, reason in sorted(result.skipped_trials.items()):
-            print(f"[skip] {trial}: {reason}")
+        _print_triangulation_issues(result)
 
 
 if __name__ == "__main__":
