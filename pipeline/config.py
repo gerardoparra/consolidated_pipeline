@@ -55,7 +55,10 @@ class Setup:
             data = json.loads(source.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"Cannot load setup JSON {source}: {exc}") from exc
-        for key in ("hosts", "cages", "calibration", "evaluation", "pose", "anipose", "slurm"):
+        for key in (
+            "hosts", "cages", "calibration", "evaluation", "pose",
+            "visualization", "anipose", "slurm",
+        ):
             if not isinstance(data.get(key), dict):
                 raise ValueError(f"setup.json needs an object named {key!r}")
         if data.get("experiment") not in {"mechanical_lockbox", "sliding_lockbox"}:
@@ -77,6 +80,11 @@ class Setup:
         for key in ("create_labeled_video", "delete_labeled_videos_after_inference"):
             if not isinstance(data["pose"].get(key), bool):
                 raise ValueError(f"pose.{key} must be a boolean")
+        preview_fps = data["visualization"].get("preview_fps")
+        if (isinstance(preview_fps, bool)
+                or not isinstance(preview_fps, (int, float))
+                or preview_fps <= 0):
+            raise ValueError("visualization.preview_fps must be a positive number")
         perspectives = {"top", "front", "side", "left", "right", "back"}
         for cage, mapping in data["cages"].items():
             if not isinstance(mapping, dict) or not mapping:

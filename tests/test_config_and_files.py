@@ -62,6 +62,18 @@ class ConfigAndFilesTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, f"pose.{key} must be a boolean"):
                     Setup.load(invalid_setup)
 
+    def test_preview_fps_must_be_a_positive_number(self):
+        for value in (0, -1, "10", True):
+            with self.subTest(value=value):
+                data = json.loads(SETUP_PATH.read_text(encoding="utf-8"))
+                data["visualization"]["preview_fps"] = value
+                invalid_setup = self.root / "invalid_setup.json"
+                invalid_setup.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    ValueError, "visualization.preview_fps must be a positive number"
+                ):
+                    Setup.load(invalid_setup)
+
     def test_zip_and_prepared_folder_inputs(self):
         experiment = self.root / "experiment"
         experiment.mkdir()

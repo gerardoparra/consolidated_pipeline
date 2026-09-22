@@ -59,6 +59,9 @@
       "back": "superanimal_quadruped"
     }
   },
+  "visualization": {
+    "preview_fps": 10.0
+  },
   "anipose": {
     "project": "mlb2",
     "nesting": 2,

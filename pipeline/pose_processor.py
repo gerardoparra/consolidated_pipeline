@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,6 +29,32 @@ class VisualizationResult:
 
 
 class PoseProcessor(AniposeRunner):
+
+    def _render_preview(self, pose_csv: Path, source_video: Path,
+                        output: Path, preview_fps: float) -> str:
+        """Run the sampled renderer in the configured Anipose environment."""
+        command = self._anipose_command()
+        if command[-1] != "anipose":
+            raise ValueError(
+                "The configured Anipose command must end in 'anipose' to run label-3d"
+            )
+        worker = Path(__file__).with_name("label_3d_preview.py")
+        command = command[:-1] + [
+            "python", str(worker),
+            "--config", str(self.experiment_dir / "config.toml"),
+            "--pose-csv", str(pose_csv),
+            "--source-video", str(source_video),
+            "--output", str(output),
+            "--fps", str(preview_fps),
+        ]
+        print(f"Rendering 3D preview: {pose_csv}", flush=True)
+        completed = subprocess.run(command, cwd=self.experiment_dir)
+        if completed.returncode:
+            raise RuntimeError(
+                f"3D preview rendering failed for {pose_csv} "
+                f"(exit {completed.returncode}); see the renderer output above."
+            )
+        return f"Rendered {pose_csv.name} at {preview_fps:g} FPS"
 
     def detect_keypoints(self, video_root: str | Path | None = None,
                          result_root: str | Path | None = None,
@@ -110,7 +138,8 @@ class PoseProcessor(AniposeRunner):
         """Render optional Anipose skeleton videos for existing 3D CSV files."""
         session = Path(session_dir)
         result = VisualizationResult()
-        pending: list[tuple[str, Path]] = []
+        pending: list[tuple[str, Path, Path, Path]] = []
+        extension = self.setup["pose"]["video_extension"]
         for cage in self.setup["cages"]:
             pose_folder = session / cage / "pose-3d"
             for pose_csv in sorted(pose_folder.glob("*.csv")):
@@ -119,14 +148,44 @@ class PoseProcessor(AniposeRunner):
                 if output.is_file() and output.stat().st_size > 0:
                     result.outputs.append(output)
                 else:
-                    pending.append((label, output))
+                    videos = sorted(
+                        (session / cage / "videos-raw").glob(
+                            f"{pose_csv.stem}*.{extension.lstrip('.')}"
+                        )
+                    )
+                    if not videos:
+                        result.skipped_trials[label] = (
+                            "No matching raw video is available to determine source FPS"
+                        )
+                        continue
+                    pending.append((label, pose_csv, videos[0], output))
         if not pending:
             return result
 
-        result.anipose_output = self._run_anipose("label-3d") or ""
-        for label, output in pending:
+        missing_tools = [name for name in ("ffmpeg", "ffprobe") if shutil.which(name) is None]
+        if missing_tools:
+            raise RuntimeError(
+                "Anipose label-3d requires the FFmpeg executables on PATH; missing: "
+                + ", ".join(missing_tools)
+                + ". Load the HPC FFmpeg module or install the FFmpeg system binaries. "
+                  "Installing a Python package named ffmpeg is not sufficient."
+            )
+
+        preview_fps = float(self.setup["visualization"]["preview_fps"])
+        diagnostics: list[str] = []
+        for label, pose_csv, source_video, output in pending:
+            try:
+                diagnostic = self._render_preview(
+                    pose_csv, source_video, output, preview_fps
+                )
+            except Exception:
+                output.unlink(missing_ok=True)
+                raise
+            if diagnostic:
+                diagnostics.append(diagnostic)
             if output.is_file() and output.stat().st_size > 0:
                 result.outputs.append(output)
             else:
                 result.skipped_trials[label] = "Anipose did not create a 3D video"
+        result.anipose_output = "\n".join(diagnostics)
         return result

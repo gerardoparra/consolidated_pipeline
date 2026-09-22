@@ -134,26 +134,47 @@ class OrchestrationTests(unittest.TestCase):
         session = prepared_session(self.root)
         pose3d = session / "CAGE1" / "pose-3d"
         pose3d.mkdir()
-        (pose3d / "trial1.csv").write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
-        (pose3d / "trial2.csv").write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
+        trial = "20260811_102757_"
+        (pose3d / f"{trial}.csv").write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
+        (pose3d / "existing.csv").write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
         videos3d = session / "CAGE1" / "videos-3d"
         videos3d.mkdir()
-        existing = videos3d / "trial1.mp4"
+        existing = videos3d / "existing.mp4"
         existing.write_bytes(b"video")
-
         processor = PoseProcessor(self.root, Setup.load(SETUP_PATH).data)
 
-        def render_missing(_action):
-            self.assertEqual(_action, "label-3d")
-            (videos3d / "trial2.mp4").write_bytes(b"video")
+        def render_missing(pose_csv, source_video, output, preview_fps):
+            self.assertEqual(pose_csv, pose3d / f"{trial}.csv")
+            self.assertEqual(source_video.name, f"{trial}camera06.mkv")
+            self.assertEqual(preview_fps, 10.0)
+            output.write_bytes(b"video")
             return "rendered"
 
-        with patch.object(processor, "_run_anipose", side_effect=render_missing):
+        with patch("pipeline.pose_processor.shutil.which", return_value="/usr/bin/tool"), \
+             patch.object(processor, "_render_preview", side_effect=render_missing):
             result = processor.render_3d(session)
 
-        self.assertEqual(result.outputs, [existing, videos3d / "trial2.mp4"])
+        self.assertEqual(result.outputs, [existing, videos3d / f"{trial}.mp4"])
         self.assertFalse(result.skipped_trials)
         self.assertEqual(result.anipose_output, "rendered")
+
+    def test_optional_3d_render_requires_ffmpeg_and_ffprobe(self):
+        session = prepared_session(self.root)
+        pose3d = session / "CAGE1" / "pose-3d"
+        pose3d.mkdir()
+        (pose3d / "20260811_102757_.csv").write_text(
+            "fnum,nose_x,nose_y,nose_z\n0,1,2,3\n"
+        )
+        processor = PoseProcessor(self.root, Setup.load(SETUP_PATH).data)
+
+        def find_tool(name):
+            return "/usr/bin/ffmpeg" if name == "ffmpeg" else None
+
+        with patch("pipeline.pose_processor.shutil.which", side_effect=find_tool), \
+             patch.object(processor, "_render_preview") as render:
+            with self.assertRaisesRegex(RuntimeError, "missing: ffprobe"):
+                processor.render_3d(session)
+        render.assert_not_called()
 
     def test_calibration_handoff_reports_missing_cage(self):
         session = self.root / "session"

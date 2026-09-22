@@ -186,12 +186,18 @@ dependencies on HPC**. The configured labeling scheme connects
 `left_eye`–`nose`–`right_eye` and `nose`–`tail_base`–`tail_end`, matching the
 current SuperAnimal output.
 
-Use the pipeline command so it temporarily generates `config.toml` with the
-behavioral `.mkv` extension. Anipose otherwise uses the calibration `.avi`
-extension, finds no behavioral source video for its frame rate, and fails with
-`IndexError: list index out of range`. The pipeline restores the calibration
-configuration after rendering. It writes animations under each cage's
-`videos-3d/` directory and skips existing nonempty videos:
+`visualization.preview_fps` in `config/setup.json` controls the rendered frame
+rate and defaults to 10 FPS. The renderer reads the original frame rate from
+one matching `.mkv` header, samples the `pose-3d` coordinate rows, and resets
+their preview frame numbers before invoking Anipose. It does not decode,
+downsample, or create another copy of the source video. For example, a
+30-minute, 30 FPS trial has about 54,000 source frames; a 10 FPS preview renders
+about 18,000 frames, while a 5 FPS preview renders about 9,000. Both retain the
+30-minute playback duration. Change the setting to `5.0` if the videos are only
+for quick quality control.
+
+The command writes animations under each cage's `videos-3d/` directory and
+skips existing nonempty videos:
 
 ```bash
 cd /scratch/lbshks/super_animal/consolidated_pipeline
@@ -274,9 +280,101 @@ python -m pip install 'anipose[viz]'
 ```
 
 The `viz` extra installs Mayavi and VTK, which are large optional dependencies.
+Anipose also uses scikit-video to encode the result, so the real `ffmpeg` and
+`ffprobe` executables must be on `PATH`; installing a Python package named
+`ffmpeg` does not provide them. First check for an HPC module, then verify both
+executables. Module names differ by cluster:
+
+```bash
+module spider ffmpeg 2>/dev/null || module avail ffmpeg
+# If a module is listed, load the listed version, for example:
+module load ffmpeg
+
+command -v ffmpeg
+command -v ffprobe
+ffmpeg -version
+ffprobe -version
+```
+
+If the cluster has no FFmpeg module, install the FFmpeg system binaries in a
+small user-managed Micromamba prefix. Micromamba is a standalone Conda-compatible
+executable and does not require an administrator or a cluster Conda module. Keep
+it and its package cache on scratch rather than `/tmp`:
+
+```bash
+# This URL is for the common Intel/AMD Linux architecture.
+uname -m  # should print x86_64
+
+PIPELINE_TOOLS=/scratch/lbshks/super_animal/tools
+MAMBA_ROOT_PREFIX=/scratch/lbshks/super_animal/micromamba
+FFMPEG_PREFIX=/scratch/lbshks/super_animal/ffmpeg
+
+mkdir -p "$PIPELINE_TOOLS"
+cd "$PIPELINE_TOOLS"
+curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest \
+  | tar -xj bin/micromamba
+
+export MAMBA_ROOT_PREFIX
+"$PIPELINE_TOOLS/bin/micromamba" create -y \
+  -p "$FFMPEG_PREFIX" -c conda-forge ffmpeg
+```
+
+This prefix is only a source of executables. Do not activate it, because that
+could replace the Python from the working pipeline `.venv`. Instead, activate
+the existing Python environment and prepend the FFmpeg binary directory:
+
+```bash
+source /scratch/lbshks/super_animal/.venv/bin/activate
+export PATH=/scratch/lbshks/super_animal/ffmpeg/bin:$PATH
+
+command -v python
+command -v anipose
+command -v ffmpeg
+command -v ffprobe
+python -c 'import skvideo; print("scikit-video FFmpeg:", skvideo.getFFmpegPath())'
+ffmpeg -version
+ffprobe -version
+```
+
+The `python` and `anipose` paths should remain under
+`/scratch/lbshks/super_animal/.venv`; `ffmpeg` and `ffprobe` should be under
+`/scratch/lbshks/super_animal/ffmpeg/bin`. Run the activation and `PATH` export
+in each new shell and in any Slurm script that renders previews. Both programs
+come from the same Conda-forge FFmpeg installation.
+
+Rendering thousands of Mayavi frames is CPU work and can take hours, so submit
+it as a CPU job instead of leaving it on the login node. Save the following as
+`render_3d.sbatch`; add the cluster's CPU partition or account directives if
+they are required:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=mlb2-render-3d
+#SBATCH --time=12:00:00
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8G
+#SBATCH --output=/scratch/lbshks/super_animal/logs/render-3d-%j.out
+#SBATCH --error=/scratch/lbshks/super_animal/logs/render-3d-%j.err
+
+set -euo pipefail
+source /scratch/lbshks/super_animal/.venv/bin/activate
+export PATH=/scratch/lbshks/super_animal/ffmpeg/bin:$PATH
+cd /scratch/lbshks/super_animal/consolidated_pipeline
+
+python -m pipeline.main label-3d "$1"
+```
+
+Submit one session with:
+
+```bash
+mkdir -p /scratch/lbshks/super_animal/logs
+sbatch render_3d.sbatch \
+  /scratch/lbshks/mlb2/experiment/SESSION_NAME
+```
+
 Mayavi depends on VTK and a rendering backend; Linux compute nodes without a
-display may also need the cluster's Xvfb package or module. Test the import
-before starting a long render:
+display may also need the cluster's Xvfb package or module. Test the import and
+display helper before starting a long render:
 
 ```bash
 python -c 'from mayavi import mlab; print("Mayavi import OK")'
