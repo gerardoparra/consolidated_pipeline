@@ -186,8 +186,8 @@ dependencies on HPC**. The configured labeling scheme connects
 `left_eye`–`nose`–`right_eye` and `nose`–`tail_base`–`tail_end`, matching the
 current SuperAnimal output.
 
-`visualization.preview_fps` in `config/setup.json` controls the rendered frame
-rate and defaults to 10 FPS. The renderer reads the original frame rate from
+`visualization.preview_fps` in `config/setup.json` sets the maximum rendered
+frame rate and defaults to 10 FPS. The renderer reads the original frame rate from
 one matching `.mkv` header, samples the `pose-3d` coordinate rows, and resets
 their preview frame numbers before invoking Anipose. It does not decode,
 downsample, or create another copy of the source video. For example, a
@@ -195,6 +195,10 @@ downsample, or create another copy of the source video. For example, a
 about 18,000 frames, while a 5 FPS preview renders about 9,000. Both retain the
 30-minute playback duration. Change the setting to `5.0` if the videos are only
 for quick quality control.
+
+The worker includes a compatibility adapter for Anipose's scikit-video 1.1.11,
+which still calls the removed NumPy `ndarray.tostring()` method. It converts
+that call to `tobytes()` at runtime without changing packages in `.venv`.
 
 The command writes animations under each cage's `videos-3d/` directory and
 skips existing nonempty videos:

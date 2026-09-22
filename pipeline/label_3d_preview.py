@@ -3,11 +3,34 @@
 from __future__ import annotations
 
 import argparse
+import math
 import tempfile
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pandas as pd
+
+
+class _ArrayWithTostring(np.ndarray):
+    """Compatibility view for old scikit-video on NumPy without tostring()."""
+
+    def tostring(self, order: str = "C") -> bytes:
+        return self.tobytes(order=order)
+
+
+def patch_legacy_skvideo_writer(writer_class: type, *, _force: bool = False) -> bool:
+    """Adapt scikit-video 1.1.11 without modifying the installed package."""
+    if not _force and hasattr(np.empty(0), "tostring"):
+        return False
+    original = writer_class.writeFrame
+
+    def write_frame(writer, image):
+        compatible = np.asarray(image).view(_ArrayWithTostring)
+        return original(writer, compatible)
+
+    writer_class.writeFrame = write_frame
+    return True
 
 
 def source_video_fps(path: Path) -> float:
@@ -25,7 +48,9 @@ def source_video_fps(path: Path) -> float:
 def sampled_pose_csv(source: Path, target_fps: float, source_fps: float,
                      destination: Path) -> tuple[int, float]:
     """Write sampled coordinates and return the stride and actual output FPS."""
-    stride = max(1, round(source_fps / target_fps))
+    # Treat target_fps as a ceiling. Using round() would turn 25 -> 10 FPS
+    # into a stride of two and an unexpectedly expensive 12.5 FPS render.
+    stride = max(1, math.ceil(source_fps / target_fps))
     output_fps = source_fps / stride
     frame = pd.read_csv(source)
     sampled = frame.iloc[::stride].copy().reset_index(drop=True)
@@ -43,6 +68,9 @@ def render_preview(config_path: Path, pose_csv: Path, source_video: Path,
         import tomllib
     except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
         import tomli as tomllib
+    import skvideo.io
+
+    patch_legacy_skvideo_writer(skvideo.io.FFmpegWriter)
     from anipose.label_videos_3d import visualize_labels
 
     with config_path.open("rb") as handle:
