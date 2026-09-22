@@ -152,6 +152,29 @@ prints Anipose's captured output after the skipped trials. Anipose may catch a
 per-trial `ValueError`, print its traceback, and still exit successfully, so an
 exit code alone does not prove that it wrote `pose-3d` output.
 
+If that output ends with `ValueError: Need at least one array to stack` from
+`aniposelib/cameras.py`, the converted HDF5 structure and calibration are not
+necessarily at fault. With `anipose.ransac` enabled, the JAX-based Aniposelib
+implementation can construct an empty camera subset when a frame/bodypart has
+no camera above `anipose.score_threshold`. One such point can abort the entire
+trial, even when the trial has good multi-camera coverage overall. The progress
+total is frames multiplied by bodyparts, so failure at `0%` indicates that the
+first flattened point triggered this case.
+
+The recommended workaround is to set `"ransac": false` under `anipose` in
+`config/setup.json`, then rerun the pipeline's `triangulate` command. The command
+regenerates `config.toml`; do not make the change only in that generated file.
+Without RANSAC, Anipose triangulates points visible in at least two cameras and
+leaves points without enough camera observations as `NaN` in the 3D CSV. Running
+`anipose analyze` or `anipose filter` is not required for this error. Lowering
+the score threshold is not a safe general workaround because it can admit the
+`-1` coordinates used for missing detections.
+
+```bash
+# After changing config/setup.json:
+python -m pipeline.main triangulate /scratch/lbshks/mlb2/experiment/SESSION_NAME
+```
+
 For each cage, the stage folders are:
 
 ```text
