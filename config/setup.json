@@ -72,7 +72,7 @@
       ["left_eye", "nose", "right_eye"],
       ["nose", "tail_base", "tail_end"]
     ],
-    "constraints": [["nose", "ear_left"], ["nose", "ear_right"], ["ear_left", "ear_right"], ["nose", "tail_base"]]
+    "constraints": [["left_eye", "nose"], ["nose", "right_eye"], ["left_eye", "right_eye"], ["nose", "tail_base"], ["tail_base", "tail_end"]]
   },
   "slurm": {
     "partition": "ex_scioi_gpu,scioi_gpu,gpu",

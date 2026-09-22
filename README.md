@@ -175,6 +175,36 @@ the score threshold is not a safe general workaround because it can admit the
 python -m pipeline.main triangulate /scratch/lbshks/mlb2/experiment/SESSION_NAME
 ```
 
+### Optional 3D visualization
+
+The consolidated pipeline stops after writing `pose-3d` CSV files. Anipose can
+render those coordinates as standalone skeleton animations with `label-3d`.
+This command is optional, is not part of the default `run`, and requires
+Anipose's Mayavi visualization dependencies described under **Install
+dependencies on HPC**. The configured labeling scheme connects
+`left_eye`–`nose`–`right_eye` and `nose`–`tail_base`–`tail_end`, matching the
+current SuperAnimal output.
+
+Run the command from the experiment root so Anipose finds the generated
+`config.toml`. It writes animations under each cage's `videos-3d/` directory:
+
+```bash
+cd /scratch/lbshks/mlb2/experiment
+anipose label-3d
+```
+
+On a headless compute node, use a virtual framebuffer if `xvfb-run` is
+available:
+
+```bash
+cd /scratch/lbshks/mlb2/experiment
+xvfb-run -a --server-args="-screen 0 1280x1024x24" anipose label-3d
+```
+
+`anipose label-combined` additionally requires retained 2D labeled videos, so
+it is not compatible with the default space-saving settings that omit or delete
+those previews.
+
 For each cage, the stage folders are:
 
 ```text
@@ -233,7 +263,25 @@ python -m pip install --upgrade pip
 python -m pip install -e . anipose
 # Only if using the optional manual-label reprojection check:
 python -m pip install -e '.[validation]'
+# Only if using Anipose's optional label-3d visualization:
+python -m pip install 'anipose[viz]'
 ```
+
+The `viz` extra installs Mayavi and VTK, which are large optional dependencies.
+Mayavi depends on VTK and a rendering backend; Linux compute nodes without a
+display may also need the cluster's Xvfb package or module. Test the import
+before starting a long render:
+
+```bash
+python -c 'from mayavi import mlab; print("Mayavi import OK")'
+command -v xvfb-run
+```
+
+Mayavi is distributed from PyPI as source rather than a platform wheel. If it
+does not build in the Python 3.13 host environment, create a separate Python
+3.11 or 3.12 visualization environment rather than replacing the working pose
+pipeline environment. The visualization environment only needs access to the
+experiment's generated `config.toml` and `pose-3d` CSV files.
 
 Activate the host `.venv` in every shell or CPU job that runs the CLI. The
 configured HPC `anipose_command` is `anipose`, so it must be on `PATH` in
