@@ -16,6 +16,7 @@ from .pose_inference import discover_videos, run_inference
 class TriangulationResult:
     outputs: list[Path] = field(default_factory=list)
     skipped_trials: dict[str, str] = field(default_factory=dict)
+    anipose_output: str = ""
 
 
 class PoseProcessor(AniposeRunner):
@@ -85,11 +86,15 @@ class PoseProcessor(AniposeRunner):
                     output.rename(archived)
                 pending.append(output)
         if pending:
-            self._run_anipose("triangulate")
+            anipose_output = self._run_anipose("triangulate") or ""
+            missing_after_run = False
             for output in pending:
                 label = f"{output.parent.parent.name}/{output.stem}"
                 if self._valid_pose3d(output):
                     result.outputs.append(output)
                 else:
+                    missing_after_run = True
                     result.skipped_trials[label] = "Anipose did not create a 3D CSV"
+            if missing_after_run:
+                result.anipose_output = anipose_output
         return result

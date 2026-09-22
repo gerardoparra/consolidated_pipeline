@@ -101,6 +101,17 @@ class OrchestrationTests(unittest.TestCase):
         anipose.assert_not_called()
         self.assertEqual(rerun.conversion.converted, [])
 
+    def test_missing_3d_output_preserves_anipose_diagnostic(self):
+        session = prepared_session(self.root, tracks_for_cage1=True)
+        processor = PoseProcessor(self.root, Setup.load(SETUP_PATH).data)
+        conversion = processor.convert_dlc_output_to_anipose(session)
+        diagnostic = "Traceback (most recent call last):\nValueError: camera names do not match"
+        with patch.object(processor, "_run_anipose", return_value=diagnostic):
+            result = processor.triangulate(session, conversion)
+        self.assertFalse(result.outputs)
+        self.assertEqual(result.anipose_output, diagnostic)
+        self.assertIn("CAGE1/20260811_102757_", result.skipped_trials)
+
     def test_calibration_handoff_reports_missing_cage(self):
         session = self.root / "session"
         calibration = session / "CAGE1" / "calibration"

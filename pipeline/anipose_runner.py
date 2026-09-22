@@ -28,7 +28,7 @@ class AniposeRunner:
             raise RuntimeError(f"Anipose command {executable!r} is unavailable on this host")
         return [str(part) for part in command]
 
-    def _run_anipose(self, action: str) -> None:
+    def _run_anipose(self, action: str) -> str:
         command = self._anipose_command() + [action]
         try:
             completed = subprocess.run(
@@ -41,3 +41,7 @@ class AniposeRunner:
                 f"Anipose {action} failed (exit {completed.returncode}).\n"
                 f"{completed.stderr or completed.stdout or 'No output from Anipose.'}"
             )
+        return "\n".join(
+            output.strip() for output in (completed.stdout, completed.stderr)
+            if output and output.strip()
+        )

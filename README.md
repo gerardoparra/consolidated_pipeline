@@ -147,6 +147,11 @@ the adapted detector and pose checkpoints. DeepLabCut adds `_after_adapt` to the
 adapted JSON report but not to its HDF5 filename. Conversion pairs that report
 with the same filename prefix and uses the corresponding adapted HDF5 file.
 
+If triangulation finds ready `pose-2d` trials but produces no 3D CSV, the CLI
+prints Anipose's captured output after the skipped trials. Anipose may catch a
+per-trial `ValueError`, print its traceback, and still exit successfully, so an
+exit code alone does not prove that it wrote `pose-3d` output.
+
 For each cage, the stage folders are:
 
 ```text

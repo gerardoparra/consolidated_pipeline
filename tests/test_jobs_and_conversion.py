@@ -142,6 +142,19 @@ class JobsAndConversionTests(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError, "Anipose executable is missing"):
             processor._run_anipose("triangulate")
 
+    def test_anipose_runner_returns_output_even_on_zero_exit(self):
+        processor = PoseProcessor(self.root, self.setup, environment="local")
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="Traceback (most recent call last):\nValueError: camera mismatch\n",
+            stderr="warning from triangulation\n",
+        )
+        with patch.object(processor, "_anipose_command", return_value=["anipose"]), \
+             patch("pipeline.anipose_runner.subprocess.run", return_value=completed):
+            output = processor._run_anipose("triangulate")
+        self.assertIn("ValueError: camera mismatch", output)
+        self.assertIn("warning from triangulation", output)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -141,6 +141,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"2D videos pending: {len(result.pending_videos)}; 3D trials: {len(result.triangulation.outputs)}")
         for trial, reason in sorted(result.triangulation.skipped_trials.items()):
             print(f"[skip] {trial}: {reason}")
+        if result.triangulation.anipose_output and result.triangulation.skipped_trials:
+            print("Anipose output:\n" + result.triangulation.anipose_output)
         return
 
     setup = Setup.load(args.config)
@@ -198,6 +200,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Converted {len(result.converted)} files; ready trials: {len(result.ready_trials)}")
         for trial, reason in sorted(result.skipped_trials.items()):
             print(f"[skip] {trial}: {reason}")
+        if result.anipose_output and result.skipped_trials:
+            print("Anipose output:\n" + result.anipose_output)
     elif args.command == "triangulate":
         converted = pose.convert_dlc_output_to_anipose(session)
         result = pose.triangulate(session, converted)
