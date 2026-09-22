@@ -19,6 +19,13 @@ class TriangulationResult:
     anipose_output: str = ""
 
 
+@dataclass
+class VisualizationResult:
+    outputs: list[Path] = field(default_factory=list)
+    skipped_trials: dict[str, str] = field(default_factory=dict)
+    anipose_output: str = ""
+
+
 class PoseProcessor(AniposeRunner):
 
     def detect_keypoints(self, video_root: str | Path | None = None,
@@ -97,4 +104,29 @@ class PoseProcessor(AniposeRunner):
                     result.skipped_trials[label] = "Anipose did not create a 3D CSV"
             if missing_after_run:
                 result.anipose_output = anipose_output
+        return result
+
+    def render_3d(self, session_dir: str | Path) -> VisualizationResult:
+        """Render optional Anipose skeleton videos for existing 3D CSV files."""
+        session = Path(session_dir)
+        result = VisualizationResult()
+        pending: list[tuple[str, Path]] = []
+        for cage in self.setup["cages"]:
+            pose_folder = session / cage / "pose-3d"
+            for pose_csv in sorted(pose_folder.glob("*.csv")):
+                label = f"{cage}/{pose_csv.stem}"
+                output = session / cage / "videos-3d" / f"{pose_csv.stem}.mp4"
+                if output.is_file() and output.stat().st_size > 0:
+                    result.outputs.append(output)
+                else:
+                    pending.append((label, output))
+        if not pending:
+            return result
+
+        result.anipose_output = self._run_anipose("label-3d") or ""
+        for label, output in pending:
+            if output.is_file() and output.stat().st_size > 0:
+                result.outputs.append(output)
+            else:
+                result.skipped_trials[label] = "Anipose did not create a 3D video"
         return result

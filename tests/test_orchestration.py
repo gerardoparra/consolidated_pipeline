@@ -130,6 +130,31 @@ class OrchestrationTests(unittest.TestCase):
         self.assertIn("[skip] CAGE2/trial", output.getvalue())
         self.assertIn("Anipose output:\nValueError", output.getvalue())
 
+    def test_optional_3d_render_resumes_from_nonempty_videos(self):
+        session = prepared_session(self.root)
+        pose3d = session / "CAGE1" / "pose-3d"
+        pose3d.mkdir()
+        (pose3d / "trial1.csv").write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
+        (pose3d / "trial2.csv").write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
+        videos3d = session / "CAGE1" / "videos-3d"
+        videos3d.mkdir()
+        existing = videos3d / "trial1.mp4"
+        existing.write_bytes(b"video")
+
+        processor = PoseProcessor(self.root, Setup.load(SETUP_PATH).data)
+
+        def render_missing(_action):
+            self.assertEqual(_action, "label-3d")
+            (videos3d / "trial2.mp4").write_bytes(b"video")
+            return "rendered"
+
+        with patch.object(processor, "_run_anipose", side_effect=render_missing):
+            result = processor.render_3d(session)
+
+        self.assertEqual(result.outputs, [existing, videos3d / "trial2.mp4"])
+        self.assertFalse(result.skipped_trials)
+        self.assertEqual(result.anipose_output, "rendered")
+
     def test_calibration_handoff_reports_missing_cage(self):
         session = self.root / "session"
         calibration = session / "CAGE1" / "calibration"

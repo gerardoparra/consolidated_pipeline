@@ -112,7 +112,8 @@ class Setup:
     def experiment_dir(self, environment: str = "auto", override: str | Path | None = None) -> Path:
         return Path(override or self.host(environment)["experiment_dir"]).expanduser().resolve()
 
-    def anipose_config_text(self, environment: str = "auto") -> str:
+    def anipose_config_text(self, environment: str = "auto", *,
+                            video_extension: str | None = None) -> str:
         cfg = self.data["anipose"]
         cal = self.data["calibration"]
         pose = self.data["pose"]
@@ -121,7 +122,7 @@ class Setup:
             "project": cfg["project"],
             "model_folder": host["model_folder"],
             "nesting": cfg["nesting"],
-            "video_extension": pose["calibration_video_extension"],
+            "video_extension": video_extension or pose["calibration_video_extension"],
         }
         content = "# Generated from config/setup.json; edit setup.json instead.\n"
         content += "\n".join(f"{key} = {_toml_value(value)}" for key, value in header.items()) + "\n\n"
@@ -143,9 +144,15 @@ class Setup:
         return content
 
     def materialize(self, experiment_dir: Path, environment: str = "auto",
-                    session_name: str | None = None) -> dict[str, Path]:
+                    session_name: str | None = None, *,
+                    anipose_video_extension: str | None = None) -> dict[str, Path]:
         root = Path(experiment_dir)
-        config = _write_if_changed(root / "config.toml", self.anipose_config_text(environment))
+        config = _write_if_changed(
+            root / "config.toml",
+            self.anipose_config_text(
+                environment, video_extension=anipose_video_extension
+            ),
+        )
         cage_map = _write_if_changed(
             root / "cage_map.json", json.dumps(self.data["cages"], indent=2) + "\n"
         )

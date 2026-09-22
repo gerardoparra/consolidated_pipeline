@@ -33,6 +33,7 @@ class ConfigAndFilesTests(unittest.TestCase):
         self.assertEqual(config["nesting"], 2)
         self.assertEqual(config["calibration"]["board_size"], [10, 7])
         self.assertEqual(config["triangulation"]["cam_regex"], "camera([0-9][0-9])")
+        self.assertEqual(config["video_extension"], "avi")
         self.assertEqual(json.loads(derived["cages"].read_text())["CAGE1"]["camera06"], "top")
         jobs = json.loads(derived["jobs"].read_text())
         self.assertIn("mlb2_experiment", jobs)
@@ -43,6 +44,13 @@ class ConfigAndFilesTests(unittest.TestCase):
         before = derived["anipose"].stat().st_mtime_ns
         self.setup.materialize(experiment, "local")
         self.assertEqual(before, derived["anipose"].stat().st_mtime_ns)
+
+        self.setup.materialize(
+            experiment, "local", anipose_video_extension="mkv"
+        )
+        with derived["anipose"].open("rb") as handle:
+            visualization_config = tomllib.load(handle)
+        self.assertEqual(visualization_config["video_extension"], "mkv")
 
     def test_labeled_video_settings_must_be_boolean(self):
         for key in ("create_labeled_video", "delete_labeled_videos_after_inference"):

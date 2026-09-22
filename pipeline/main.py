@@ -104,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("pose", "Preview or submit a SuperAnimal Slurm job"),
         ("convert", "Stage complete SuperAnimal trials in pose-2d"),
         ("triangulate", "Triangulate ready pose-2d trials"),
+        ("label-3d", "Render optional skeleton videos from pose-3d CSVs"),
     ):
         sub = commands.add_parser(name, help=help_text)
         _add_common(sub)
@@ -175,7 +176,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "downsample":
         print(f"Downsampled {len(video.downsample(session))} calibration directories")
         return
-    if args.command != "labels":
+    if args.command not in {"labels", "label-3d"}:
         setup.materialize(root, args.environment, session.name)
     if args.command == "calibrate":
         result = calibration.calibrate_cameras(session)
@@ -210,6 +211,23 @@ def main(argv: list[str] | None = None) -> None:
         result = pose.triangulate(session, converted)
         print(f"3D CSVs: {len(result.outputs)}")
         _print_triangulation_issues(result)
+    elif args.command == "label-3d":
+        # Anipose uses one global video_extension for both calibration and 3D
+        # rendering. MLB2 uses AVI calibration videos and MKV behavior videos,
+        # so materialize the behavior extension only for this command.
+        setup.materialize(
+            root, args.environment, session.name,
+            anipose_video_extension=setup.data["pose"]["video_extension"],
+        )
+        try:
+            result = pose.render_3d(session)
+        finally:
+            setup.materialize(root, args.environment, session.name)
+        print(f"3D videos: {len(result.outputs)}")
+        for trial, reason in sorted(result.skipped_trials.items()):
+            print(f"[skip] {trial}: {reason}")
+        if result.anipose_output and result.skipped_trials:
+            print("Anipose output:\n" + result.anipose_output)
 
 
 if __name__ == "__main__":

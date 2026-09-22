@@ -113,6 +113,7 @@ python -m pipeline.main pose SESSION_DIR            # preview
 python -m pipeline.main pose SESSION_DIR --submit   # HPC only
 python -m pipeline.main convert SESSION_DIR
 python -m pipeline.main triangulate SESSION_DIR
+python -m pipeline.main label-3d SESSION_DIR
 ```
 
 The manual calibration check is separate from the default run. After
@@ -177,28 +178,33 @@ python -m pipeline.main triangulate /scratch/lbshks/mlb2/experiment/SESSION_NAME
 
 ### Optional 3D visualization
 
-The consolidated pipeline stops after writing `pose-3d` CSV files. Anipose can
-render those coordinates as standalone skeleton animations with `label-3d`.
-This command is optional, is not part of the default `run`, and requires
+The default pipeline stops after writing `pose-3d` CSV files. The optional
+pipeline `label-3d` command renders those coordinates as standalone skeleton
+animations. It is not part of the default `run` and requires
 Anipose's Mayavi visualization dependencies described under **Install
 dependencies on HPC**. The configured labeling scheme connects
 `left_eye`–`nose`–`right_eye` and `nose`–`tail_base`–`tail_end`, matching the
 current SuperAnimal output.
 
-Run the command from the experiment root so Anipose finds the generated
-`config.toml`. It writes animations under each cage's `videos-3d/` directory:
+Use the pipeline command so it temporarily generates `config.toml` with the
+behavioral `.mkv` extension. Anipose otherwise uses the calibration `.avi`
+extension, finds no behavioral source video for its frame rate, and fails with
+`IndexError: list index out of range`. The pipeline restores the calibration
+configuration after rendering. It writes animations under each cage's
+`videos-3d/` directory and skips existing nonempty videos:
 
 ```bash
-cd /scratch/lbshks/mlb2/experiment
-anipose label-3d
+cd /scratch/lbshks/super_animal/consolidated_pipeline
+python -m pipeline.main label-3d /scratch/lbshks/mlb2/experiment/SESSION_NAME
 ```
 
 On a headless compute node, use a virtual framebuffer if `xvfb-run` is
 available:
 
 ```bash
-cd /scratch/lbshks/mlb2/experiment
-xvfb-run -a --server-args="-screen 0 1280x1024x24" anipose label-3d
+cd /scratch/lbshks/super_animal/consolidated_pipeline
+xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+  python -m pipeline.main label-3d /scratch/lbshks/mlb2/experiment/SESSION_NAME
 ```
 
 `anipose label-combined` additionally requires retained 2D labeled videos, so
