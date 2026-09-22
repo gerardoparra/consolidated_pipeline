@@ -68,7 +68,10 @@
     "optim": false,
     "reproj_error_threshold": 3,
     "score_threshold": 0.6,
-    "scheme": [["nose", "ear_left"], ["nose", "ear_right"], ["ear_left", "ear_right"], ["nose", "tail_base"]],
+    "scheme": [
+      ["left_eye", "nose", "right_eye"],
+      ["nose", "tail_base", "tail_end"]
+    ],
     "constraints": [["nose", "ear_left"], ["nose", "ear_right"], ["ear_left", "ear_right"], ["nose", "tail_base"]]
   },
   "slurm": {
