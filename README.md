@@ -252,3 +252,28 @@ command copies one existing MLB2 calibration into a temporary project,
 generates synthetic five-camera 2D poses, runs real Anipose triangulation, and
 removes the temporary project. GPU SuperAnimal inference requires the HPC DLC
 container and was not run locally.
+
+## Working with limited HPC storage
+
+ZIP import now extracts into a temporary directory beside the destination
+session and removes that staging directory if extraction fails. Older versions
+used the system temporary directory; a `No space left on device` error during
+`extractall` may therefore mean `/tmp` filled rather than the experiment
+scratch area. Before retrying a failed ZIP, check the available space and your
+cluster quota, and inspect any old `rat_lockbox_unzip_*` directories left by a
+failed run. A ZIP kept on scratch and its extracted session both consume space.
+
+If scratch cannot hold the ZIP, extracted videos, tracking intermediates, and
+outputs at once, prepare and downsample the session locally. Transfer one
+prepared session at a time with `CAGE*/videos-raw/` and the low-FPS videos in
+`CAGE*/calibration/`; `calibration/originals/` and the ZIP can stay on local
+storage. Run `python -m pipeline.main prepare ZIP_PATH` locally, transfer the
+resulting prepared session, then run
+`python -m pipeline.main run SESSION_DIR --environment hpc --submit` from the
+activated HPC environment. This runs
+calibration and submits SuperAnimal tracking; rerun it after the GPU job finishes
+to convert and triangulate ready trials. After verifying and backing up the
+calibration and pose outputs, remove unneeded videos from scratch before
+transferring the next session. The pipeline discovers trials from `videos-raw/`,
+so deleting those files prevents a later `run` or `convert` from resuming that
+session; finish and verify 3D output first.

@@ -1,3 +1,4 @@
+import errno
 import json
 import tempfile
 import tomllib
@@ -53,6 +54,16 @@ class ConfigAndFilesTests(unittest.TestCase):
         imported = handler.import_raw_data(archive)
         self.assertEqual(imported, experiment / "day1")
         self.assertTrue((imported / "CAGE1" / "example.txt").is_file())
+        self.assertFalse(list(experiment.glob("rat_lockbox_unzip_*")))
+
+        flat_archive = self.root / "day_flat.zip"
+        with zipfile.ZipFile(flat_archive, "w") as zip_file:
+            zip_file.writestr("CAGE1/example.txt", "one")
+            zip_file.writestr("CAGE2/example.txt", "two")
+        flat = handler.import_raw_data(flat_archive)
+        self.assertTrue((flat / "CAGE1" / "example.txt").is_file())
+        self.assertTrue((flat / "CAGE2" / "example.txt").is_file())
+        self.assertFalse(list(experiment.glob("rat_lockbox_unzip_*")))
 
         prepared = self.root / "day2"
         (prepared / "CAGE1" / "calibration").mkdir(parents=True)
@@ -62,6 +73,25 @@ class ConfigAndFilesTests(unittest.TestCase):
         self.assertTrue(handler.is_prepared(moved))
         self.assertFalse(prepared.exists())
         self.assertEqual(handler.import_raw_data(moved), moved)
+
+    def test_failed_zip_extract_cleans_staging_on_experiment_filesystem(self):
+        experiment = self.root / "experiment"
+        experiment.mkdir()
+        archive = self.root / "day1.zip"
+        with zipfile.ZipFile(archive, "w") as zip_file:
+            zip_file.writestr("CAGE1/example.txt", "data")
+
+        def interrupted_extract(_zip_file, staging, *_args, **_kwargs):
+            self.assertEqual(Path(staging).parent, experiment)
+            (Path(staging) / "partial.txt").write_text("partial", encoding="utf-8")
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        with patch("pipeline.calibration_prep.zipfile.ZipFile.extractall", new=interrupted_extract):
+            with self.assertRaises(OSError):
+                FileHandler(experiment, self.setup.data).import_raw_data(archive)
+
+        self.assertFalse((experiment / "day1").exists())
+        self.assertFalse(list(experiment.glob("rat_lockbox_unzip_*")))
 
     def test_video_preparation_preserves_current_calibration_parameters(self):
         experiment = self.root / "experiment"

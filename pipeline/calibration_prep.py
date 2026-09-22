@@ -113,8 +113,8 @@ def extract_or_prepare_folder(
 
     If the archive (or source folder, when *unzip* is ``False``) contains a
     single top-level directory it is moved directly to the destination;
-    otherwise a new directory with the stem name is created and all
-    top-level entries are moved into it.
+    otherwise the extracted entries become the destination directory. ZIPs
+    are staged on the destination filesystem, not in the system temp folder.
 
     Parameters
     ----------
@@ -129,8 +129,8 @@ def extract_or_prepare_folder(
         is skipped and *zip_path* is treated as a directory whose contents
         are organized directly into *target_dir*.
     keep_temp : bool
-        When ``True`` the temporary extraction directory is preserved.
-        Useful for debugging. Only relevant when *unzip* is ``True``.
+        When ``True`` a temporary extraction directory is preserved after a
+        failed extraction for debugging. Only relevant when *unzip* is ``True``.
 
     Returns
     -------
@@ -150,24 +150,26 @@ def extract_or_prepare_folder(
     if destination.exists():
         raise FileExistsError(f"Destination already exists: {destination}")
 
-    if unzip:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            temp_dir = Path(tempfile.mkdtemp(prefix="rat_lockbox_unzip_"))
-            zf.extractall(temp_dir)
-    else:
-        temp_dir = zip_path
+    temp_dir = Path(tempfile.mkdtemp(prefix="rat_lockbox_unzip_", dir=target_dir)) if unzip else zip_path
+    try:
+        if unzip:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(temp_dir)
 
-    entries = [p for p in temp_dir.iterdir()]
-    if len(entries) == 1 and entries[0].is_dir():
-        shutil.move(str(entries[0]), str(destination))
-    else:
-        destination.mkdir(parents=True, exist_ok=False)
-        for entry in entries:
-            shutil.move(str(entry), str(destination / entry.name))
-
-    if unzip and temp_dir.exists() and not keep_temp:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    return destination
+        entries = list(temp_dir.iterdir())
+        if len(entries) == 1 and entries[0].is_dir():
+            shutil.move(str(entries[0]), str(destination))
+        elif unzip:
+            # Rename the staging directory in place, avoiding a second copy.
+            temp_dir.rename(destination)
+        else:
+            destination.mkdir(parents=True, exist_ok=False)
+            for entry in entries:
+                shutil.move(str(entry), str(destination / entry.name))
+        return destination
+    finally:
+        if unzip and temp_dir.exists() and not keep_temp:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def extract_zip(zip_path: str | Path, target_dir: str | Path,
