@@ -34,6 +34,19 @@ The `prepare` command also performs downsampling; the separate `downsample`
 command resumes that step for an organized session. The optional manual-label
 calibration check is described under **Additional commands**.
 
+In `config/setup.json`, `pose.create_labeled_video` controls whether SuperAnimal
+also renders labeled preview videos. The MLB2 default is `false` to save space;
+2D HDF5 tracks and adaptation JSON reports are still produced. Set it to `true`
+to restore labeled videos. `pose.delete_labeled_videos_after_inference` defaults
+to `true` as a second space-saving measure. After inference, the worker removes
+matching labeled `.mp4` previews from `tracks/` only when that raw video's HDF5
+track and `*_after_adapt.json` report are complete. It also cleans previews for
+tracks already complete when the worker is rerun. It never deletes raw videos,
+HDF5 tracks, or JSON reports. Set the cleanup option to `false` to keep previews.
+If the installed DeepLabCut does not accept `create_labeled_video`, the worker
+uses its default video behavior and the cleanup setting still applies. Neither
+setting removes previews from sessions that are not rerun through the worker.
+
 ## Run one session
 
 From this repository, use Python 3.10 or newer:
@@ -224,7 +237,7 @@ module load singularity
 singularity exec --nv --containall --bind "$PWD:$PWD:ro" \
   /scratch/lbshks/super_animal/deeplabcut_sandbox \
   env PYTHONPATH="$PWD" python3 -c \
-  'import cv2, numpy, pandas, tables, torch; from deeplabcut.modelzoo.video_inference import video_inference_superanimal; assert torch.cuda.is_available()'
+  'import cv2, inspect, numpy, pandas, tables, torch; from deeplabcut.modelzoo.video_inference import video_inference_superanimal; assert torch.cuda.is_available(); print("create_labeled_video supported:", "create_labeled_video" in inspect.signature(video_inference_superanimal).parameters)'
 ```
 
 Finally, confirm that `sbatch`, the configured Singularity module and sandbox,

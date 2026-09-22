@@ -43,6 +43,8 @@ class PoseProcessor(AniposeRunner):
             adapt_batch_size=adapt_batch_size or pose["adapt_batch_size"],
             model_configs=pose["perspective_models"], model_name=pose["model_name"],
             detector_name=pose["detector_name"], max_individuals=pose["max_individuals"],
+            create_labeled_video=pose["create_labeled_video"],
+            delete_labeled_videos_after_inference=pose["delete_labeled_videos_after_inference"],
         )
 
     def convert_dlc_output_to_anipose(self, session_dir: str | Path) -> ConversionResult:

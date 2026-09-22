@@ -44,6 +44,16 @@ class ConfigAndFilesTests(unittest.TestCase):
         self.setup.materialize(experiment, "local")
         self.assertEqual(before, derived["anipose"].stat().st_mtime_ns)
 
+    def test_labeled_video_settings_must_be_boolean(self):
+        for key in ("create_labeled_video", "delete_labeled_videos_after_inference"):
+            with self.subTest(key=key):
+                data = json.loads(SETUP_PATH.read_text(encoding="utf-8"))
+                data["pose"][key] = "false"
+                invalid_setup = self.root / "invalid_setup.json"
+                invalid_setup.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, f"pose.{key} must be a boolean"):
+                    Setup.load(invalid_setup)
+
     def test_zip_and_prepared_folder_inputs(self):
         experiment = self.root / "experiment"
         experiment.mkdir()

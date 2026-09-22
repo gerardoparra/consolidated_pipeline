@@ -42,6 +42,8 @@
     "video_extension": "mkv",
     "calibration_video_extension": "avi",
     "skip_existing": true,
+    "create_labeled_video": false,
+    "delete_labeled_videos_after_inference": true,
     "inference_batch_size": 8,
     "detector_batch_size": 8,
     "adapt_batch_size": 8,

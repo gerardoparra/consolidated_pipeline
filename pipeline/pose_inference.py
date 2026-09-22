@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -80,6 +81,24 @@ def has_existing_track(video: Path, destination: Path, video_adapt: bool = True)
     return h5 and (adapted or not video_adapt)
 
 
+def delete_completed_labeled_videos(video: Path, destination: Path) -> int:
+    """Remove only labeled preview MP4s for a completed raw video."""
+    if not has_existing_track(video, destination) or not destination.is_dir():
+        return 0
+    removed = 0
+    for path in destination.iterdir():
+        if (path.is_file() and path.suffix.lower() == ".mp4"
+                and path.name.startswith(f"{video.stem}_")
+                and "_labeled" in path.stem[len(video.stem) + 1:]):
+            try:
+                path.unlink()
+            except OSError as exc:
+                print(f"Could not remove labeled preview {path}: {exc}")
+            else:
+                removed += 1
+    return removed
+
+
 def group_videos(videos: Iterable[Path], video_root: str | Path,
                  result_root: str | Path, cage_maps: Mapping[str, Mapping[str, str]],
                  *, skip_existing: bool = True,
@@ -115,7 +134,9 @@ def run_inference(videos: Iterable[Path], video_root: str | Path,
                   output_layout: str = "sibling-tracks",
                   inference_batch_size: int = 1,
                   detector_batch_size: int = 1,
-                  adapt_batch_size: int = 4) -> None:
+                  adapt_batch_size: int = 4,
+                  create_labeled_video: bool = True,
+                  delete_labeled_videos_after_inference: bool = False) -> None:
     """Apply current SuperAnimal models to incomplete videos inside the DLC container."""
     try:
         from deeplabcut.modelzoo.video_inference import video_inference_superanimal
@@ -124,6 +145,7 @@ def run_inference(videos: Iterable[Path], video_root: str | Path,
 
     result = Path(result_root).expanduser().resolve()
     result.mkdir(parents=True, exist_ok=True)
+    videos = list(videos)
     groups, errors = group_videos(
         videos, video_root, result, cage_maps,
         skip_existing=skip_existing, output_layout=output_layout,
@@ -131,6 +153,26 @@ def run_inference(videos: Iterable[Path], video_root: str | Path,
     (result / "error_vid.txt").write_text(
         "".join(f"{message}\n" for message in errors), encoding="utf-8"
     )
+    if delete_labeled_videos_after_inference:
+        pending_videos = {video for paths in groups.values() for video in paths}
+        for video in videos:
+            if video not in pending_videos:
+                try:
+                    cage = cage_name_for_video(video, video_root, cage_maps)
+                    if determine_perspective(video, cage_maps[cage]) is None:
+                        continue
+                    destination = video_output_folder(video, video_root, result, output_layout)
+                except ValueError:
+                    continue
+                delete_completed_labeled_videos(video, destination)
+
+    parameters = inspect.signature(video_inference_superanimal).parameters
+    supports_labeled_option = (
+        "create_labeled_video" in parameters
+        or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+    )
+    if not supports_labeled_option:
+        print("Installed SuperAnimal does not accept create_labeled_video; using its default output behavior")
     for (perspective, destination), paths in sorted(
         groups.items(), key=lambda item: (item[0][0], str(item[0][1]))
     ):
@@ -138,6 +180,7 @@ def run_inference(videos: Iterable[Path], video_root: str | Path,
             raise ValueError(f"No SuperAnimal model configured for perspective {perspective!r}")
         destination.mkdir(parents=True, exist_ok=True)
         print(f"{len(paths)} file(s): {perspective} -> {destination}")
+        labeled_option = {"create_labeled_video": create_labeled_video} if supports_labeled_option else {}
         video_inference_superanimal(
             [str(path) for path in paths], model_configs[perspective],
             model_name=model_name, detector_name=detector_name,
@@ -147,4 +190,9 @@ def run_inference(videos: Iterable[Path], video_root: str | Path,
             video_adapt_batch_size=adapt_batch_size,
             scale_list=[], dest_folder=str(destination),
             max_individuals=max_individuals,
+            **labeled_option,
         )
+        if delete_labeled_videos_after_inference:
+            removed = sum(delete_completed_labeled_videos(video, destination) for video in paths)
+            if removed:
+                print(f"Removed {removed} labeled preview video(s) from {destination}")

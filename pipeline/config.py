@@ -74,6 +74,9 @@ class Setup:
         for key in ("repository_dir", "sandbox", "cache_dir", "tmp_dir", "singularity_module"):
             if not data["hosts"]["hpc"].get(key):
                 raise ValueError(f"hosts.hpc.{key} is required")
+        for key in ("create_labeled_video", "delete_labeled_videos_after_inference"):
+            if not isinstance(data["pose"].get(key), bool):
+                raise ValueError(f"pose.{key} must be a boolean")
         perspectives = {"top", "front", "side", "left", "right", "back"}
         for cage, mapping in data["cages"].items():
             if not isinstance(mapping, dict) or not mapping:
