@@ -92,7 +92,7 @@ def run_pose_detection_pipeline(
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--job", action="store_true",
+    parser.add_argument("--slurm", action="store_true",
                         help="Queue this stage on HPC and return immediately")
     parser.add_argument("--config", type=Path, default=DEFAULT_SETUP,
                         help="Single setup JSON (default: config/setup.json)")
@@ -102,7 +102,7 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="MLB2 calibration and pose pipeline")
+    parser = argparse.ArgumentParser(prog="lb-pipeline", description="Lockbox calibration and pose pipeline")
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("run", "Advance a raw or prepared session through all ready stages"),
@@ -124,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             sub.add_argument("session", type=Path, help="Prepared session directory")
         if name in {"run", "pose"}:
-            sub.add_argument("--submit", action="store_true", help="Submit Slurm job on HPC")
+            sub.add_argument("--slurm-pose", action="store_true", help="Submit only GPU tracking; run other stages in the current shell")
         if name == "pose":
             sub.add_argument("--retry-job", action="store_true", help="Submit again despite saved job ID")
         if name == "evaluate":
@@ -170,7 +170,7 @@ def _queue_stage(args: argparse.Namespace, setup: Setup) -> None:
         if args.command == "labels":
             arguments.extend(["--frame-index", str(args.frame_index)])
         if args.command == "run":
-            arguments.append("--submit")
+            arguments.append("--slurm-pose")
         result = submit_stage(setup.data, args.command, arguments)
     _print_job(args.command, result)
     if args.command == "run":
@@ -180,12 +180,14 @@ def _queue_stage(args: argparse.Namespace, setup: Setup) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if getattr(args, "job", False) or getattr(args, "submit", False):
+    if getattr(args, "slurm", False) and getattr(args, "slurm_pose", False):
+        parser.error("Choose --slurm to queue the stage or --slurm-pose to queue only tracking")
+    if getattr(args, "slurm", False) or getattr(args, "slurm_pose", False):
         try:
             setup = Setup.load(args.config)
             if setup.host_name(args.environment) != "hpc":
                 raise ValueError("Slurm submission must run on HPC; run this command on the HPC host")
-            if args.job:
+            if args.slurm:
                 _queue_stage(args, setup)
                 return
         except (ValueError, RuntimeError, OSError) as exc:
@@ -193,7 +195,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "run":
         result = run_pose_detection_pipeline(
             args.source, args.experiment_dir, args.config,
-            submit_jobs=args.submit, environment=args.environment,
+            submit_jobs=args.slurm_pose, environment=args.environment,
         )
         print(f"{result.status}: {result.session_dir}")
         print(f"Camera calibrations: {len(result.calibration.tomls)}")
@@ -256,7 +258,7 @@ def main(argv: list[str] | None = None) -> None:
         else:
             manager = JobManager(root, setup.data, session,
                                  setup_path=setup.path if setup.host_name(args.environment) == "hpc" else None)
-            result = manager.submit(retry=args.retry_job) if args.submit else manager.preview()
+            result = manager.submit(retry=args.retry_job) if args.slurm_pose else manager.preview()
             print(f"{len(pending)} videos pending; Slurm {result.status}: {result.command}")
             if result.job_id:
                 print(f"Job ID: {result.job_id}")

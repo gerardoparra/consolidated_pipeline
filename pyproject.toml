@@ -19,7 +19,7 @@ dependencies = [
 validation = ["aniposelib", "matplotlib"]
 
 [project.scripts]
-mlb2-pipeline = "pipeline.main:main"
+lb-pipeline = "pipeline.main:main"
 
 [tool.setuptools]
 packages = ["pipeline", "config"]

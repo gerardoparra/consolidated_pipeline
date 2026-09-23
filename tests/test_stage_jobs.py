@@ -37,26 +37,38 @@ class StageJobTests(unittest.TestCase):
     def test_every_stage_has_job_flag(self):
         for stage in ("run", "prepare", "downsample", "calibrate", "labels", "evaluate",
                       "pose", "convert", "filter", "triangulate", "label-3d"):
-            self.assertTrue(build_parser().parse_args([stage, str(self.session), "--job"]).job)
+            self.assertTrue(build_parser().parse_args([stage, str(self.session), "--slurm"]).slurm)
 
-    def test_cpu_submission_quotes_worker_and_omits_gpu_resources(self):
+    def test_new_flags_are_explicit_and_old_flags_are_rejected(self):
+        self.assertEqual(build_parser().prog, "lb-pipeline")
+        args = build_parser().parse_args(["run", str(self.session), "--slurm-pose"])
+        self.assertTrue(args.slurm_pose)
+        self.assertFalse(args.slurm)
+        for flags in (["--job"], ["--submit"], ["--slurm", "--slurm-pose"]):
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                main(["run", str(self.session), *flags])
+
+    def test_stage_submission_quotes_worker_and_shares_gpu_resources(self):
         arguments = [str(self.session), "--config", str(self.config), "--environment", "hpc"]
         with patch("pipeline.job_manager._is_windows", return_value=False), \
              patch("pipeline.job_manager.subprocess.run", return_value=SimpleNamespace(stdout="123;cluster\n")) as run:
             result = submit_stage(self.data, "calibrate", arguments)
         command = run.call_args.args[0]
-        self.assertNotIn("--partition", command)
-        self.assertNotIn("--gres", command)
+        gpu_command = JobManager(self.root, self.data, self.session).command()
+        for key in ("partition", "gres", "constraint", "time", "job_name"):
+            flag = "--" + key.replace("_", "-")
+            self.assertEqual(command[command.index(flag) + 1], self.data["slurm"][key])
+            self.assertEqual(command[command.index(flag) + 1], gpu_command[gpu_command.index(flag) + 1])
         script = run.call_args.kwargs["input"]
         worker = shlex.split(script.split("exec ", 1)[1])
         self.assertEqual(worker[1:], ["-m", "pipeline.main", "calibrate", *arguments])
-        self.assertNotIn("--job", worker)
+        self.assertNotIn("--slurm", worker)
         self.assertEqual(result.job_id, "123")
         self.assertTrue(result.output_log.endswith("calibrate-123.out"))
         self.assertTrue((self.repository / "logs" / "submission-123.json").exists())
 
-    def test_cpu_resources_and_each_submission_is_new(self):
-        self.data["slurm"]["cpu"] = {"partition": "cpu", "cpus": 8, "memory": "32G", "time": "02:00:00"}
+    def test_shared_resources_and_each_submission_is_new(self):
+        self.data["slurm"].update({"partition": "gpu", "cpus": 8, "memory": "32G", "time": "02:00:00"})
         state = self.session / "pipeline_state.json"
         state.write_text('{"pose_job_id": "99"}')
         with patch("pipeline.job_manager._is_windows", return_value=False), \
@@ -65,7 +77,7 @@ class StageJobTests(unittest.TestCase):
                 submit_stage(self.data, "triangulate", [str(self.session)])
         self.assertEqual(run.call_count, 2)
         command = run.call_args.args[0]
-        for flag, value in (("--partition", "cpu"), ("--cpus-per-task", "8"),
+        for flag, value in (("--partition", "gpu"), ("--cpus-per-task", "8"),
                             ("--mem", "32G"), ("--time", "02:00:00")):
             self.assertEqual(command[command.index(flag) + 1], value)
         self.assertEqual(json.loads(state.read_text()), {"pose_job_id": "99"})
@@ -79,15 +91,15 @@ class StageJobTests(unittest.TestCase):
                  patch("pipeline.main.FileHandler", side_effect=AssertionError("processing on login node")), \
                  patch("pipeline.main.Setup.materialize", side_effect=AssertionError("materialized on login node")), \
                  redirect_stdout(io.StringIO()):
-                main([stage, str(self.session), "--job", "--environment", "hpc",
+                main([stage, str(self.session), "--slurm", "--environment", "hpc",
                       "--config", str(self.config), "--experiment-dir", str(self.root), *extras])
                 args = submit.call_args.args[2]
                 self.assertEqual(args[0], str(self.session))
                 self.assertEqual(args[args.index("--config") + 1], str(self.config))
                 self.assertEqual(args[args.index("--experiment-dir") + 1], str(self.root))
-                self.assertNotIn("--job", args)
+                self.assertNotIn("--slurm", args)
                 if stage == "run":
-                    self.assertIn("--submit", args)
+                    self.assertIn("--slurm-pose", args)
                 for extra in extras:
                     self.assertIn(extra, args)
 
@@ -98,7 +110,7 @@ class StageJobTests(unittest.TestCase):
              patch("pipeline.job_manager.subprocess.run", return_value=SimpleNamespace(stdout="125")) as run, \
              patch("pipeline.main.FileHandler", side_effect=AssertionError("processing")), \
              redirect_stdout(io.StringIO()) as output:
-            main(["pose", str(self.session), "--job", "--environment", "hpc", "--config", str(self.config)])
+            main(["pose", str(self.session), "--slurm", "--environment", "hpc", "--config", str(self.config)])
         command = run.call_args.args[0]
         self.assertEqual(command[-1], str(self.session))
         exports = next(arg for arg in command if arg.startswith("--export="))
@@ -138,13 +150,7 @@ class StageJobTests(unittest.TestCase):
             main(worker[3:])
         downsample.assert_called_once_with(self.session)
 
-    def test_config_validates_cpu_resources_and_python(self):
-        for cpu in ({"cpus": 0}, {"cpus": True}, {"memory": 32}, {"unknown": "x"}):
-            self.data["slurm"]["cpu"] = cpu
-            self.config.write_text(json.dumps(self.data))
-            with self.assertRaises(ValueError):
-                Setup.load(self.config)
-        self.data["slurm"]["cpu"] = {}
+    def test_config_validates_python(self):
         self.data["hosts"]["hpc"]["python_executable"] = "relative/python"
         self.config.write_text(json.dumps(self.data))
         with self.assertRaises(ValueError):
@@ -165,7 +171,7 @@ class StageJobTests(unittest.TestCase):
         for environment, source in (("local", self.session), ("hpc", self.root / "missing")):
             with patch("pipeline.main.submit_stage") as submit, redirect_stderr(io.StringIO()), \
                  self.assertRaises(SystemExit):
-                main(["calibrate", str(source), "--job", "--environment", environment,
+                main(["calibrate", str(source), "--slurm", "--environment", environment,
                       "--config", str(self.config)])
             submit.assert_not_called()
 

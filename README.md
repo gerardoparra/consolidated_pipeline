@@ -18,7 +18,7 @@ changes in `setup.json` so they survive the next run.
 ## Pipeline stages
 
 The `run` command advances through the stages below in order. It resumes from
-completed outputs, previews missing GPU work unless `--submit` is supplied,
+completed outputs, previews missing GPU work unless `--slurm` or `--slurm-pose` is supplied,
 and can be run again after tracking finishes.
 
 | Stage / CLI command | What it does | Main output |
@@ -51,42 +51,36 @@ setting removes previews from sessions that are not rerun through the worker.
 ## Run one session
 
 On HPC, submit any stage from the login node using its name, input path, and
-`--job`. Activate the host environment once; no shell-script editing or manual
+`--slurm`. Activate the host environment once; no shell-script editing or manual
 compute allocation is needed:
 
 ```bash
 cd /scratch/lbshks/super_animal/consolidated_pipeline
 source /scratch/lbshks/super_animal/.venv/bin/activate
-mlb2-pipeline calibrate /path/to/session --job
-mlb2-pipeline triangulate /path/to/session --job
-mlb2-pipeline pose /path/to/session --job
-mlb2-pipeline prepare /path/to/session.zip --job
+lb-pipeline calibrate /path/to/session --slurm
+lb-pipeline triangulate /path/to/session --slurm
+lb-pipeline pose /path/to/session --slurm
+lb-pipeline prepare /path/to/session.zip --slurm
 ```
 
-`python -m pipeline.main STAGE PATH --job` is equivalent. Every public stage
-accepts `--job`, including `labels`, `evaluate`, and `label-3d`; their usual
+After updating an existing installation, run `python -m pip install -e .`
+once to register the renamed `lb-pipeline` command. The old flags `--job` and
+`--submit` are replaced by `--slurm` and `--slurm-pose`, respectively.
+
+`python -m pipeline.main STAGE PATH --slurm` is equivalent. Every public stage
+accepts `--slurm`, including `labels`, `evaluate`, and `label-3d`; their usual
 options are forwarded. Submission returns immediately with the job ID, log
 paths, and commands to check or cancel the job. All processing happens on the
-compute node. The paths must be accessible there. CPU submissions each create
+compute node. The paths must be accessible there. Host-stage submissions each create
 a new job; GPU tracking retains its saved-job protection and `--retry-job`.
 
-CPU stages use the cluster's default partition and resources. Override them
-only if needed in `setup.json`, independently of the existing GPU settings:
+Every queued stage uses the same `slurm` object in `setup.json`: `partition`,
+`gres`, `constraint`, `time`, and `job_name`. Optional `cpus` and `memory` also
+belong directly in that object and apply to every job. There is no separate
+CPU resource configuration. Even stages that only perform CPU work request
+the configured GPU allocation.
 
-```json
-"slurm": {
-  "cpu": {
-    "partition": "YOUR_CPU_PARTITION",
-    "cpus": 8,
-    "memory": "32G",
-    "time": "02:00:00"
-  }
-}
-```
-
-Merge this `cpu` object into the existing `slurm` object; retain the GPU keys.
-The supplied `"cpu": {}` leaves every CPU resource option to Slurm. CPU jobs
-inherit the submitting environment and use its Python interpreter, or the
+Host-Python jobs inherit the submitting environment and use its interpreter, or the
 optional absolute `hosts.hpc.python_executable` path. Activate an environment
 with the pipeline and Anipose installed and load any required tools before
 submitting. Optional headless visualization still needs the display setup
@@ -96,15 +90,16 @@ the configured repository's `logs/` directory.
 To queue the full run:
 
 ```bash
-mlb2-pipeline run /path/to/session --job
+lb-pipeline run /path/to/session --slurm
 ```
 
-This queues CPU preparation/calibration and submits GPU tracking when needed.
+This queues preparation/calibration using the shared GPU Slurm settings and
+submits tracking as a separate job with those same settings when needed.
 It does not automatically queue a continuation after tracking. Once tracking
 finishes, rerun using the **prepared session directory** to complete 3D work.
 For ZIP/raw inputs, use the resulting session under the configured experiment
-directory. `run --submit` retains its earlier behavior: CPU work runs in the
-calling shell and only tracking is submitted. Use `--job` from the login node.
+directory. `run --slurm-pose` retains its earlier behavior: CPU work runs in the
+calling shell and only tracking is submitted. Use `--slurm` from the login node.
 
 From this repository, use Python 3.10 or newer:
 
@@ -126,13 +121,13 @@ environment described below before running from a CPU allocation:
 ```bash
 cd /scratch/lbshks/super_animal/consolidated_pipeline
 source /scratch/lbshks/super_animal/.venv/bin/activate
-python -m pipeline.main run /scratch/lbshks/mlb2/experiment/SESSION_NAME --environment hpc --submit
+python -m pipeline.main run /scratch/lbshks/mlb2/experiment/SESSION_NAME --environment hpc --slurm-pose
 ```
 
-`--submit` (or `--job`) enables Slurm submission. GPU jobs are scoped to the selected
+`--slurm-pose` (or `--slurm`) enables Slurm submission. GPU jobs are scoped to the selected
 session; the returned job ID is saved in that session's `pipeline_state.json`.
 Repeated runs will show the saved ID instead of submitting a duplicate. If a
-job has ended without producing tracks, `pose SESSION_NAME --submit --retry-job`
+job has ended without producing tracks, `pose SESSION_NAME --slurm-pose --retry-job`
 submits a replacement. Data transfer between local and HPC experiment roots is
 handled outside this package.
 
@@ -167,7 +162,7 @@ python -m pipeline.main prepare ZIP_OR_FOLDER
 python -m pipeline.main downsample SESSION_DIR
 python -m pipeline.main calibrate SESSION_DIR
 python -m pipeline.main pose SESSION_DIR            # preview
-python -m pipeline.main pose SESSION_DIR --submit   # HPC only
+python -m pipeline.main pose SESSION_DIR --slurm-pose   # HPC only
 python -m pipeline.main convert SESSION_DIR
 python -m pipeline.main filter SESSION_DIR
 python -m pipeline.main triangulate SESSION_DIR
@@ -363,8 +358,8 @@ There are two Python environments. Preparation, calibration, conversion, and
 triangulation use a **host Python environment** with this package and Anipose.
 The GPU Slurm worker uses Python **inside the Singularity sandbox**; installing
 DeepLabCut only in the host environment will not make it available to the worker.
-Without `--job`, `run` performs preparation and calibration in the shell
-that invokes it, so use a CPU allocation for that form. With `--job`, submit
+Without `--slurm`, `run` performs preparation and calibration in the shell
+that invokes it, so use a CPU allocation for that form. With `--slurm`, submit
 directly from the login node; CPU work is queued and the GPU worker is submitted
 from that job when needed.
 
@@ -594,7 +589,7 @@ prepared session at a time with `CAGE*/videos-raw/` and the low-FPS videos in
 `CAGE*/calibration/`; `calibration/originals/` and the ZIP can stay on local
 storage. Run `python -m pipeline.main prepare ZIP_PATH` locally, transfer the
 resulting prepared session, then run
-`python -m pipeline.main run SESSION_DIR --environment hpc --submit` from the
+`python -m pipeline.main run SESSION_DIR --environment hpc --slurm-pose` from the
 activated HPC environment. This runs
 calibration and submits SuperAnimal tracking; rerun it after the GPU job finishes
 to convert and triangulate ready trials. After verifying and backing up the

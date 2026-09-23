@@ -1,4 +1,4 @@
-"""Submit CPU stages and preview or submit session-scoped SuperAnimal jobs."""
+"""Submit pipeline stages using the shared Slurm settings."""
 
 from __future__ import annotations
 
@@ -41,6 +41,19 @@ def _submit(command: list[str], script: str | None = None) -> str:
     return match.group(1)
 
 
+def _slurm_options(setup: dict) -> list[str]:
+    """Use the same resource settings for host stages and container tracking."""
+    options = []
+    for key, flag in (("job_name", "--job-name"), ("partition", "--partition"),
+                      ("gres", "--gres"), ("constraint", "--constraint"),
+                      ("time", "--time"), ("cpus", "--cpus-per-task"),
+                      ("memory", "--mem")):
+        value = setup["slurm"].get(key)
+        if value is not None:
+            options.extend([flag, str(value)])
+    return options
+
+
 def submit_stage(setup: dict, stage: str, arguments: list[str]) -> JobResult:
     """Queue a host-Python stage without running any session processing."""
     if _is_windows():
@@ -55,14 +68,9 @@ def submit_stage(setup: dict, stage: str, arguments: list[str]) -> JobResult:
     logs.mkdir(parents=True, exist_ok=True)
     output = str(logs / f"{stage}-%j.out")
     error = str(logs / f"{stage}-%j.err")
-    command = ["sbatch", "--parsable", "--job-name", f"mlb2-{stage}",
+    command = ["sbatch", "--parsable", *_slurm_options(setup),
                "--chdir", str(repository), "--output", output, "--error", error,
                "--export=ALL"]
-    for key, flag in (("partition", "--partition"), ("cpus", "--cpus-per-task"),
-                      ("memory", "--mem"), ("time", "--time")):
-        value = setup["slurm"].get("cpu", {}).get(key)
-        if value is not None:
-            command.extend([flag, str(value)])
     worker = [str(python), "-m", "pipeline.main", stage, *arguments]
     script = "#!/bin/bash\nset -euo pipefail\nexec " + shlex.join(worker) + "\n"
     job_id = _submit(command, script)
@@ -116,7 +124,6 @@ class JobManager:
     def command(self) -> list[str]:
         hpc = self.setup["hosts"]["hpc"]
         pose = self.setup["pose"]
-        slurm = self.setup["slurm"]
         root = self._root()
         repository, setup_json, wrapper = hpc_repository_paths(hpc)
         setup_json = self.setup_path or setup_json
@@ -132,11 +139,7 @@ class JobManager:
             ("PIPELINE_ADAPT_BATCH_SIZE", pose["adapt_batch_size"]),
         )]
         return [
-            "sbatch", "--parsable", "--job-name", slurm["job_name"],
-            "--partition", slurm["partition"],
-            "--gres", slurm["gres"],
-            "--constraint", slurm["constraint"],
-            "--time", slurm["time"],
+            "sbatch", "--parsable", *_slurm_options(self.setup),
             "--chdir", str(repository),
             "--output", str(repository / "logs" / "submission-%x.%j.out"),
             "--error", str(repository / "logs" / "submission-%x.%j.err"),
