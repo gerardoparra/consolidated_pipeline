@@ -1,6 +1,18 @@
 # SuperAnimal model development
 
+[Back to the README](../README.md) · [Installation and configuration](../README.md#installation) · [HPC setup](hpc-setup.md)
+
 `lb-pipeline model` is used to control DLC/Superanimal model creation, fine-tuning, and evaluation.
+
+Follow this guide after installing the pipeline. Model development uses named
+experiments and labeled datasets; the separate [session workflow](../README.md#process-a-session)
+processes camera recordings into 3D poses.
+
+- [Configure a development experiment](#configure)
+- [Initialize, match, review, and train](#develop)
+- [Apply models and evaluate results](#apply-and-evaluate)
+- [Run on HPC or through Python](#hpc-and-python)
+- [Validation and source provenance](#validation-and-provenance)
 
 ## Configure
 
