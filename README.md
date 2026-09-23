@@ -232,6 +232,13 @@ constraints. These stages cannot create new camera evidence. In particular,
 long `tail_end` occlusions should still be treated cautiously even if the
 optimizer returns coordinates.
 
+Anipose 1.1.24 uses an older positional form of pandas' `to_hdf` call that is
+incompatible with current pandas releases. The pipeline applies a
+process-local compatibility shim when it launches `anipose filter`; no pandas
+downgrade or edit under `site-packages` is needed. If filtering still reports
+the positional `NDFrame.to_hdf()` error, pull the current pipeline checkout
+before rerunning the command.
+
 ### Optional 3D visualization
 
 The default pipeline stops after writing `pose-3d` CSV files. The optional

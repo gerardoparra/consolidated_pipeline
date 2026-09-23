@@ -30,9 +30,22 @@ class AniposeRunner:
 
     def _run_anipose(self, action: str) -> str:
         command = self._anipose_command() + [action]
+        env = None
+        if action == "filter":
+            # Anipose 1.1.24 calls DataFrame.to_hdf(path, key, ...), while
+            # current pandas makes ``key`` keyword-only.  Load a narrowly
+            # scoped sitecustomize shim in the Anipose subprocess so users do
+            # not need to modify site-packages or downgrade pandas.
+            compat_dir = Path(__file__).with_name("_anipose_compat")
+            env = os.environ.copy()
+            existing = env.get("PYTHONPATH")
+            env["PYTHONPATH"] = str(compat_dir) + (
+                os.pathsep + existing if existing else ""
+            )
         try:
             completed = subprocess.run(
-                command, cwd=self.experiment_dir, text=True, capture_output=True
+                command, cwd=self.experiment_dir, text=True,
+                capture_output=True, env=env,
             )
         except OSError as exc:
             raise RuntimeError(f"Could not start Anipose {action}: {exc}") from exc

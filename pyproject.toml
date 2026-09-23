@@ -25,5 +25,5 @@ mlb2-pipeline = "pipeline.main:main"
 packages = ["pipeline", "config"]
 
 [tool.setuptools.package-data]
-pipeline = ["*.sh"]
+pipeline = ["*.sh", "_anipose_compat/*.py"]
 config = ["setup.json"]
