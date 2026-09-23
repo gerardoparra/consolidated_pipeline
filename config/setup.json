@@ -62,13 +62,28 @@
   "visualization": {
     "preview_fps": 10.0
   },
+  "filter": {
+    "enabled": true,
+    "type": "medfilt",
+    "medfilt": 5,
+    "offset_threshold": 25,
+    "score_threshold": 0.6,
+    "spline": false
+  },
   "anipose": {
     "project": "mlb2",
     "nesting": 2,
     "cam_regex": "camera([0-9][0-9])",
     "num_cams": 5,
     "ransac": false,
-    "optim": false,
+    "optim": true,
+    "optim_chunking": true,
+    "optim_chunking_size": 10000,
+    "scale_smooth": 4,
+    "scale_length": 2,
+    "scale_length_weak": 0.5,
+    "n_deriv_smooth": 1,
+    "constraints_weak": [],
     "reproj_error_threshold": 3,
     "score_threshold": 0.6,
     "scheme": [

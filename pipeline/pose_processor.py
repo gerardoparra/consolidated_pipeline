@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -22,6 +24,14 @@ class TriangulationResult:
 
 
 @dataclass
+class FilteringResult:
+    outputs: list[Path] = field(default_factory=list)
+    ready_trials: list[str] = field(default_factory=list)
+    skipped_trials: dict[str, str] = field(default_factory=dict)
+    anipose_output: str = ""
+
+
+@dataclass
 class VisualizationResult:
     outputs: list[Path] = field(default_factory=list)
     skipped_trials: dict[str, str] = field(default_factory=dict)
@@ -29,6 +39,46 @@ class VisualizationResult:
 
 
 class PoseProcessor(AniposeRunner):
+
+    @staticmethod
+    def _settings_digest(settings: object) -> str:
+        encoded = json.dumps(settings, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _read_state(path: Path) -> dict:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _write_state(path: Path, value: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+
+    @staticmethod
+    def _archive(path: Path, label: str = "stale") -> Path:
+        archived = path.with_name(path.name + f".{label}")
+        suffix = 1
+        while archived.exists():
+            archived = path.with_name(path.name + f".{label}.{suffix}")
+            suffix += 1
+        path.rename(archived)
+        return archived
+
+    @staticmethod
+    def _valid_pose2d(path: Path) -> bool:
+        if not path.is_file() or path.stat().st_size == 0:
+            return False
+        try:
+            with pd.HDFStore(path, mode="r") as store:
+                return bool(store.keys())
+        except (OSError, ValueError, KeyError):
+            return False
 
     def _render_preview(self, pose_csv: Path, source_video: Path,
                         output: Path, preview_fps: float) -> str:
@@ -89,6 +139,67 @@ class PoseProcessor(AniposeRunner):
             self.setup["anipose"]["cam_regex"],
         )
 
+    def filter_2d(self, session_dir: str | Path,
+                  conversion: ConversionResult) -> FilteringResult:
+        """Temporally filter converted camera tracks and resume valid outputs."""
+        session = Path(session_dir)
+        result = FilteringResult(skipped_trials=dict(conversion.skipped_trials))
+        if not self.setup["filter"]["enabled"]:
+            result.ready_trials = list(conversion.ready_trials)
+            return result
+
+        digest = self._settings_digest(self.setup["filter"])
+        pending: list[tuple[str, list[tuple[Path, Path]]]] = []
+        touched_cages: set[str] = set()
+        for label in conversion.ready_trials:
+            cage, trial = label.split("/", 1)
+            source_folder = session / cage / "pose-2d"
+            output_folder = session / cage / "pose-2d-filtered"
+            sources = sorted(source_folder.glob(f"{trial}*.h5"))
+            if len(sources) != self.setup["anipose"]["num_cams"]:
+                result.skipped_trials[label] = (
+                    f"Need {self.setup['anipose']['num_cams']} converted camera files; "
+                    f"found {len(sources)}"
+                )
+                continue
+            pairs = [(source, output_folder / source.name) for source in sources]
+            state = self._read_state(output_folder / ".pipeline-filter.json")
+            settings_match = state.get("settings_digest") == digest
+            valid = settings_match and all(
+                self._valid_pose2d(output)
+                and output.stat().st_mtime_ns >= source.stat().st_mtime_ns
+                for source, output in pairs
+            )
+            if valid:
+                result.outputs.extend(output for _, output in pairs)
+                result.ready_trials.append(label)
+                continue
+            for _, output in pairs:
+                if output.exists():
+                    # Filtered tracks are reproducible from pose-2d and can be
+                    # large, so replace stale copies instead of accumulating them.
+                    output.unlink()
+            pending.append((label, pairs))
+            touched_cages.add(cage)
+
+        if pending:
+            result.anipose_output = self._run_anipose("filter") or ""
+            for label, pairs in pending:
+                outputs = [output for _, output in pairs]
+                if all(self._valid_pose2d(output) for output in outputs):
+                    result.outputs.extend(outputs)
+                    result.ready_trials.append(label)
+                else:
+                    result.skipped_trials[label] = (
+                        "Anipose did not create every filtered camera HDF5"
+                    )
+            for cage in touched_cages:
+                self._write_state(
+                    session / cage / "pose-2d-filtered" / ".pipeline-filter.json",
+                    {"settings_digest": digest},
+                )
+        return result
+
     @staticmethod
     def _valid_pose3d(path: Path) -> bool:
         if not path.is_file() or path.stat().st_size == 0:
@@ -102,28 +213,48 @@ class PoseProcessor(AniposeRunner):
                 and any(name.endswith("_x") and name[:-2] + "_y" in columns
                         and name[:-2] + "_z" in columns for name in columns))
 
-    def triangulate(self, session_dir: str | Path, conversion: ConversionResult) -> TriangulationResult:
+    def triangulate(self, session_dir: str | Path,
+                    inputs: ConversionResult | FilteringResult) -> TriangulationResult:
         session = Path(session_dir)
-        result = TriangulationResult(skipped_trials=dict(conversion.skipped_trials))
-        pending: list[Path] = []
-        for label in conversion.ready_trials:
+        result = TriangulationResult(skipped_trials=dict(inputs.skipped_trials))
+        pending: list[tuple[Path, str]] = []
+        digest = self._settings_digest({
+            "filter": self.setup["filter"],
+            "triangulation": self.setup["anipose"],
+        })
+        input_folder_name = (
+            "pose-2d-filtered" if self.setup["filter"]["enabled"] else "pose-2d"
+        )
+        touched_cages: set[str] = set()
+        for label in inputs.ready_trials:
             cage, trial = label.split("/", 1)
             output = session / cage / "pose-3d" / f"{trial}.csv"
-            if self._valid_pose3d(output):
+            state = self._read_state(output.parent / ".pipeline-triangulation.json")
+            sources = list((session / cage / input_folder_name).glob(f"{trial}*.h5"))
+            calibration = session / cage / "calibration" / "calibration.toml"
+            dependencies = sources + ([calibration] if calibration.is_file() else [])
+            latest_input = max(
+                (path.stat().st_mtime_ns for path in dependencies), default=0
+            )
+            valid = (
+                state.get("settings_digest") == digest
+                and self._valid_pose3d(output)
+                and output.stat().st_mtime_ns >= latest_input
+            )
+            if valid:
                 result.outputs.append(output)
             else:
                 if output.exists():
-                    archived = output.with_name(output.name + ".invalid")
-                    suffix = 1
-                    while archived.exists():
-                        archived = output.with_name(output.name + f".invalid.{suffix}")
-                        suffix += 1
-                    output.rename(archived)
-                pending.append(output)
+                    self._archive(output)
+                preview = session / cage / "videos-3d" / f"{trial}.mp4"
+                if preview.exists():
+                    self._archive(preview)
+                pending.append((output, cage))
+                touched_cages.add(cage)
         if pending:
             anipose_output = self._run_anipose("triangulate") or ""
             missing_after_run = False
-            for output in pending:
+            for output, _ in pending:
                 label = f"{output.parent.parent.name}/{output.stem}"
                 if self._valid_pose3d(output):
                     result.outputs.append(output)
@@ -132,6 +263,11 @@ class PoseProcessor(AniposeRunner):
                     result.skipped_trials[label] = "Anipose did not create a 3D CSV"
             if missing_after_run:
                 result.anipose_output = anipose_output
+            for cage in touched_cages:
+                self._write_state(
+                    session / cage / "pose-3d" / ".pipeline-triangulation.json",
+                    {"settings_digest": digest},
+                )
         return result
 
     def render_3d(self, session_dir: str | Path) -> VisualizationResult:

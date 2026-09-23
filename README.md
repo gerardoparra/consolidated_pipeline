@@ -28,7 +28,8 @@ and can be run again after tracking finishes.
 | Camera calibration / `calibrate` | Use the ChArUco-board videos to estimate the five cameras' geometry for each cage. | `calibration/calibration.toml` |
 | 2D tracking / `pose` | Run SuperAnimal on the raw behavioral videos with the configured top-view or quadruped model. On HPC, preview or submit a GPU Slurm job. | Sibling `tracks/` HDF5 files and adaptation reports |
 | Convert tracks / `convert` | Group synchronized five-camera trials, verify matching frames and shared keypoints, and write Anipose-compatible 2D tracks. | `pose-2d/` HDF5 files |
-| 3D pose / `triangulate` | Use Anipose and the saved camera calibration to triangulate complete 2D trials. | `pose-3d/` trial CSV files |
+| Filter 2D tracks / `filter` | Reject low-confidence points and jumps in each camera, then interpolate temporally with the configured Anipose threshold filter. | `pose-2d-filtered/` HDF5 files |
+| Optimized 3D pose / `triangulate` | Triangulate filtered tracks across cameras, then apply temporal smoothing and body-segment constraints in chunks. | `pose-3d/` trial CSV files |
 
 The `prepare` command also performs downsampling; the separate `downsample`
 command resumes that step for an organized session. The optional manual-label
@@ -112,6 +113,7 @@ python -m pipeline.main calibrate SESSION_DIR
 python -m pipeline.main pose SESSION_DIR            # preview
 python -m pipeline.main pose SESSION_DIR --submit   # HPC only
 python -m pipeline.main convert SESSION_DIR
+python -m pipeline.main filter SESSION_DIR
 python -m pipeline.main triangulate SESSION_DIR
 python -m pipeline.main label-3d SESSION_DIR
 ```
@@ -166,15 +168,69 @@ The recommended workaround is to set `"ransac": false` under `anipose` in
 `config/setup.json`, then rerun the pipeline's `triangulate` command. The command
 regenerates `config.toml`; do not make the change only in that generated file.
 Without RANSAC, Anipose triangulates points visible in at least two cameras and
-leaves points without enough camera observations as `NaN` in the 3D CSV. Running
-`anipose analyze` or `anipose filter` is not required for this error. Lowering
-the score threshold is not a safe general workaround because it can admit the
-`-1` coordinates used for missing detections.
+leaves points without enough camera observations as `NaN` in the 3D CSV.
+RANSAC remains disabled in the MLB2 defaults. Lowering the score threshold is
+not a safe general workaround because it can admit the `-1` coordinates used
+for missing detections.
 
 ```bash
 # After changing config/setup.json:
 python -m pipeline.main triangulate /scratch/lbshks/mlb2/experiment/SESSION_NAME
 ```
+
+### Filtering and optimized triangulation
+
+The MLB2 defaults now enable Anipose's temporal 2D threshold filter and
+constrained 3D optimization. The settings remain in `config/setup.json`, which
+generates these sections in `config.toml`:
+
+```json
+"filter": {
+  "enabled": true,
+  "type": "medfilt",
+  "medfilt": 5,
+  "offset_threshold": 25,
+  "score_threshold": 0.6,
+  "spline": false
+}
+```
+
+The triangulation settings retain `ransac: false` and set `optim: true`, with
+`scale_smooth: 4`, `scale_length: 2`, `scale_length_weak: 0.5`, and
+`n_deriv_smooth: 1`. Optimization is split into 10,000-frame chunks so long
+MLB2 trials do not have to be optimized as one large problem. Linear
+interpolation is used initially because it is less prone than cubic splines to
+overshoot during rapid mouse movement.
+
+To run only the temporal filtering stage and inspect its outputs:
+
+```bash
+python -m pipeline.main filter /scratch/lbshks/mlb2/experiment/SESSION_NAME
+```
+
+To perform all ready pose stages, including conversion, filtering, and
+optimized triangulation, use the single command:
+
+```bash
+python -m pipeline.main triangulate /scratch/lbshks/mlb2/experiment/SESSION_NAME
+```
+
+The full `run` command follows the same sequence automatically. The pipeline
+records the filter and triangulation settings used for each cage. When inputs
+or relevant settings change, it archives outdated derived files with a
+`.stale` suffix before recomputing them. Consequently, the first optimized run
+preserves existing unoptimized `pose-3d/*.csv` files and corresponding
+`videos-3d/*.mp4` previews as `.stale`; run `label-3d` after triangulation to
+render new previews from the optimized CSVs.
+
+The median filter rejects low-confidence points and abrupt jumps, then
+interpolates each camera's remaining gaps in time. Stock Anipose does not set
+a maximum interpolation gap, and it only interpolates a coordinate when more
+than half of that coordinate's samples are valid. The 3D optimizer then uses
+the filtered camera views, neighboring frames, and the configured body-segment
+constraints. These stages cannot create new camera evidence. In particular,
+long `tail_end` occlusions should still be treated cautiously even if the
+optimizer returns coordinates.
 
 ### Optional 3D visualization
 
@@ -229,7 +285,8 @@ SESSION/CAGE1/
   videos-raw/    # source experiment videos
   tracks/        # SuperAnimal outputs
   pose-2d/       # normalized Anipose HDF5 files
-  pose-3d/       # Anipose trial CSV files
+  pose-2d-filtered/ # temporally filtered camera tracks
+  pose-3d/       # optimized Anipose trial CSV files
 ```
 
 Camera selection and calibration-video downsampling preserve the prior

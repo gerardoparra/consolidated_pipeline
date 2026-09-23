@@ -33,6 +33,14 @@ class ConfigAndFilesTests(unittest.TestCase):
         self.assertEqual(config["nesting"], 2)
         self.assertEqual(config["calibration"]["board_size"], [10, 7])
         self.assertEqual(config["triangulation"]["cam_regex"], "camera([0-9][0-9])")
+        self.assertTrue(config["filter"]["enabled"])
+        self.assertEqual(config["filter"]["type"], "medfilt")
+        self.assertEqual(config["filter"]["medfilt"], 5)
+        self.assertFalse(config["filter"]["spline"])
+        self.assertTrue(config["triangulation"]["optim"])
+        self.assertFalse(config["triangulation"]["ransac"])
+        self.assertEqual(config["triangulation"]["optim_chunking_size"], 10000)
+        self.assertEqual(config["pipeline"]["pose_2d_filter"], "pose-2d-filtered")
         self.assertEqual(config["video_extension"], "avi")
         self.assertEqual(json.loads(derived["cages"].read_text())["CAGE1"]["camera06"], "top")
         jobs = json.loads(derived["jobs"].read_text())
@@ -72,6 +80,24 @@ class ConfigAndFilesTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     ValueError, "visualization.preview_fps must be a positive number"
                 ):
+                    Setup.load(invalid_setup)
+
+    def test_filter_settings_are_validated(self):
+        invalid_values = {
+            "enabled": "true",
+            "type": "viterbi",
+            "medfilt": 4,
+            "offset_threshold": -1,
+            "score_threshold": -0.1,
+            "spline": "false",
+        }
+        for key, value in invalid_values.items():
+            with self.subTest(key=key):
+                data = json.loads(SETUP_PATH.read_text(encoding="utf-8"))
+                data["filter"][key] = value
+                invalid_setup = self.root / "invalid_setup.json"
+                invalid_setup.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, f"filter.{key}"):
                     Setup.load(invalid_setup)
 
     def test_zip_and_prepared_folder_inputs(self):

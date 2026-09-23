@@ -15,7 +15,7 @@ from pipeline.main import (
     build_parser,
     run_pose_detection_pipeline,
 )
-from pipeline.pose_processor import TriangulationResult
+from pipeline.pose_processor import FilteringResult, TriangulationResult
 from pipeline.pose_processor import PoseProcessor
 
 
@@ -88,18 +88,28 @@ class OrchestrationTests(unittest.TestCase):
         session = prepared_session(self.root, tracks_for_cage1=True)
         actions = []
 
-        def complete_triangulation(processor, action):
+        def complete_processing(processor, action):
             actions.append(action)
-            output = session / "CAGE1" / "pose-3d"
-            output.mkdir()
-            (output / "20260811_102757_.csv").write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
+            if action == "filter":
+                source = session / "CAGE1" / "pose-2d"
+                output = session / "CAGE1" / "pose-2d-filtered"
+                output.mkdir()
+                for path in source.glob("*.h5"):
+                    (output / path.name).write_bytes(path.read_bytes())
+            elif action == "triangulate":
+                output = session / "CAGE1" / "pose-3d"
+                output.mkdir()
+                (output / "20260811_102757_.csv").write_text(
+                    "fnum,nose_x,nose_y,nose_z\n0,1,2,3\n"
+                )
 
-        with patch.object(PoseProcessor, "_run_anipose", complete_triangulation):
+        with patch.object(PoseProcessor, "_run_anipose", complete_processing):
             result = run_pose_detection_pipeline(session, self.root, SETUP_PATH)
-        self.assertEqual(actions, ["triangulate"])
+        self.assertEqual(actions, ["filter", "triangulate"])
         self.assertEqual(result.status, "partial")
         self.assertEqual(len(result.pending_videos), 5)
         self.assertEqual(len(result.conversion.converted), 5)
+        self.assertEqual(len(result.filtering.outputs), 5)
         self.assertEqual(len(result.triangulation.outputs), 1)
         converted = session / "CAGE1" / "pose-2d" / "20260811_102757_camera06.h5"
         self.assertEqual(pd.read_hdf(converted).columns.nlevels, 3)
@@ -112,12 +122,45 @@ class OrchestrationTests(unittest.TestCase):
         session = prepared_session(self.root, tracks_for_cage1=True)
         processor = PoseProcessor(self.root, Setup.load(SETUP_PATH).data)
         conversion = processor.convert_dlc_output_to_anipose(session)
+        filtering = FilteringResult(ready_trials=list(conversion.ready_trials))
         diagnostic = "Traceback (most recent call last):\nValueError: camera names do not match"
         with patch.object(processor, "_run_anipose", return_value=diagnostic):
-            result = processor.triangulate(session, conversion)
+            result = processor.triangulate(session, filtering)
         self.assertFalse(result.outputs)
         self.assertEqual(result.anipose_output, diagnostic)
         self.assertIn("CAGE1/20260811_102757_", result.skipped_trials)
+
+    def test_filter_and_optim_archive_existing_untracked_3d_outputs(self):
+        session = prepared_session(self.root, tracks_for_cage1=True)
+        processor = PoseProcessor(self.root, Setup.load(SETUP_PATH).data)
+        conversion = processor.convert_dlc_output_to_anipose(session)
+        pose3d = session / "CAGE1" / "pose-3d"
+        videos3d = session / "CAGE1" / "videos-3d"
+        pose3d.mkdir()
+        videos3d.mkdir()
+        old_csv = pose3d / "20260811_102757_.csv"
+        old_video = videos3d / "20260811_102757_.mp4"
+        old_csv.write_text("fnum,nose_x,nose_y,nose_z\n0,9,9,9\n")
+        old_video.write_bytes(b"old video")
+
+        def complete_processing(action):
+            if action == "filter":
+                filtered = session / "CAGE1" / "pose-2d-filtered"
+                filtered.mkdir()
+                for source in (session / "CAGE1" / "pose-2d").glob("*.h5"):
+                    (filtered / source.name).write_bytes(source.read_bytes())
+            elif action == "triangulate":
+                self.assertFalse(old_csv.exists())
+                self.assertFalse(old_video.exists())
+                old_csv.write_text("fnum,nose_x,nose_y,nose_z\n0,1,2,3\n")
+
+        with patch.object(processor, "_run_anipose", side_effect=complete_processing):
+            filtering = processor.filter_2d(session, conversion)
+            result = processor.triangulate(session, filtering)
+
+        self.assertEqual(result.outputs, [old_csv])
+        self.assertTrue((pose3d / "20260811_102757_.csv.stale").is_file())
+        self.assertTrue((videos3d / "20260811_102757_.mp4.stale").is_file())
 
     def test_standalone_triangulation_output_includes_anipose_diagnostic(self):
         result = TriangulationResult(

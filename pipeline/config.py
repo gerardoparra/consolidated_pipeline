@@ -57,7 +57,7 @@ class Setup:
             raise ValueError(f"Cannot load setup JSON {source}: {exc}") from exc
         for key in (
             "hosts", "cages", "calibration", "evaluation", "pose",
-            "visualization", "anipose", "slurm",
+            "visualization", "filter", "anipose", "slurm",
         ):
             if not isinstance(data.get(key), dict):
                 raise ValueError(f"setup.json needs an object named {key!r}")
@@ -85,6 +85,22 @@ class Setup:
                 or not isinstance(preview_fps, (int, float))
                 or preview_fps <= 0):
             raise ValueError("visualization.preview_fps must be a positive number")
+        filtering = data["filter"]
+        if not isinstance(filtering.get("enabled"), bool):
+            raise ValueError("filter.enabled must be a boolean")
+        if filtering.get("type") != "medfilt":
+            raise ValueError("filter.type must be 'medfilt'")
+        medfilt = filtering.get("medfilt")
+        if (isinstance(medfilt, bool) or not isinstance(medfilt, int)
+                or medfilt <= 0 or medfilt % 2 == 0):
+            raise ValueError("filter.medfilt must be a positive odd integer")
+        for key in ("offset_threshold", "score_threshold"):
+            value = filtering.get(key)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or value < 0):
+                raise ValueError(f"filter.{key} must be a nonnegative number")
+        if not isinstance(filtering.get("spline"), bool):
+            raise ValueError("filter.spline must be a boolean")
         perspectives = {"top", "front", "side", "left", "right", "back"}
         for cage, mapping in data["cages"].items():
             if not isinstance(mapping, dict) or not mapping:
@@ -95,6 +111,21 @@ class Setup:
             raise ValueError("calibration.fps must be positive")
         if data["anipose"].get("num_cams", 0) < 2:
             raise ValueError("anipose.num_cams must be at least two")
+        for key in ("ransac", "optim", "optim_chunking"):
+            if not isinstance(data["anipose"].get(key), bool):
+                raise ValueError(f"anipose.{key} must be a boolean")
+        chunk_size = data["anipose"].get("optim_chunking_size")
+        if (isinstance(chunk_size, bool) or not isinstance(chunk_size, int)
+                or chunk_size <= 0):
+            raise ValueError("anipose.optim_chunking_size must be a positive integer")
+        for key in (
+            "scale_smooth", "scale_length", "scale_length_weak",
+            "n_deriv_smooth", "reproj_error_threshold", "score_threshold",
+        ):
+            value = data["anipose"].get(key)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or value < 0):
+                raise ValueError(f"anipose.{key} must be a nonnegative number")
         camera_pattern = data["anipose"].get("cam_regex", "")
         try:
             if re.compile(camera_pattern).groups != 1:
@@ -124,6 +155,7 @@ class Setup:
                             video_extension: str | None = None) -> str:
         cfg = self.data["anipose"]
         cal = self.data["calibration"]
+        filtering = self.data["filter"]
         pose = self.data["pose"]
         host = self.host(environment)
         header = {
@@ -135,7 +167,8 @@ class Setup:
         content = "# Generated from config/setup.json; edit setup.json instead.\n"
         content += "\n".join(f"{key} = {_toml_value(value)}" for key, value in header.items()) + "\n\n"
         content += _toml_section("pipeline", {
-            "videos_raw": "videos-raw", "pose_2d": "pose-2d", "pose_3d": "pose-3d",
+            "videos_raw": "videos-raw", "pose_2d": "pose-2d",
+            "pose_2d_filter": "pose-2d-filtered", "pose_3d": "pose-3d",
             "calibration_videos": "calibration", "calibration_results": "calibration",
         }) + "\n"
         content += _toml_section("calibration", {
@@ -144,10 +177,13 @@ class Setup:
         }) + "\n"
         content += _toml_section("manual_verification", {"manually_verify": cal["manually_verify"]}) + "\n"
         content += _toml_section("labeling", {"scheme": cfg["scheme"]}) + "\n"
-        content += _toml_section("filter", {"enabled": False}) + "\n"
+        content += _toml_section("filter", filtering) + "\n"
         content += _toml_section("triangulation", {
             key: cfg[key] for key in ("cam_regex", "num_cams", "ransac", "optim",
-                                   "constraints", "reproj_error_threshold", "score_threshold")
+                                   "optim_chunking", "optim_chunking_size",
+                                   "constraints", "constraints_weak", "scale_smooth",
+                                   "scale_length", "scale_length_weak", "n_deriv_smooth",
+                                   "reproj_error_threshold", "score_threshold")
         })
         return content
 

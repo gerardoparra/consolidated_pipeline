@@ -11,7 +11,7 @@ from .config import Setup
 from .conversion import ConversionResult
 from .file_handler import FileHandler
 from .job_manager import JobManager, JobResult
-from .pose_processor import PoseProcessor, TriangulationResult
+from .pose_processor import FilteringResult, PoseProcessor, TriangulationResult
 from .video_processor import VideoProcessor
 
 
@@ -25,6 +25,7 @@ class PipelineRunResult:
     calibration: CalibrationResult
     job: JobResult | None = None
     conversion: ConversionResult = field(default_factory=ConversionResult)
+    filtering: FilteringResult = field(default_factory=FilteringResult)
     triangulation: TriangulationResult = field(default_factory=TriangulationResult)
     pending_videos: list[Path] = field(default_factory=list)
 
@@ -69,17 +70,21 @@ def run_pose_detection_pipeline(
     if pending:
         job = job_manager.submit() if submit_jobs else job_manager.preview()
     conversion = pose_processor.convert_dlc_output_to_anipose(session)
-    triangulation = pose_processor.triangulate(session, conversion)
+    filtering = pose_processor.filter_2d(session, conversion)
+    triangulation = pose_processor.triangulate(session, filtering)
     if not file_handler.raw_videos(session):
         status = "empty_session"
     elif pending:
         status = "partial" if triangulation.outputs else "pending_pose"
-    elif conversion.skipped_trials or triangulation.skipped_trials or calibration.skipped_cages:
+    elif (conversion.skipped_trials or filtering.skipped_trials
+          or triangulation.skipped_trials or calibration.skipped_cages):
         status = "partial"
     else:
         status = "complete"
     return PipelineRunResult(
-        status, session, calibration, job, conversion, triangulation, pending
+        status=status, session_dir=session, calibration=calibration, job=job,
+        conversion=conversion, filtering=filtering, triangulation=triangulation,
+        pending_videos=pending,
     )
 
 
@@ -103,7 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("evaluate", "Evaluate camera calibration from manual label CSVs"),
         ("pose", "Preview or submit a SuperAnimal Slurm job"),
         ("convert", "Stage complete SuperAnimal trials in pose-2d"),
-        ("triangulate", "Triangulate ready pose-2d trials"),
+        ("filter", "Temporally filter ready pose-2d trials"),
+        ("triangulate", "Filter and optimize ready 3D trials"),
         ("label-3d", "Render optional skeleton videos from pose-3d CSVs"),
     ):
         sub = commands.add_parser(name, help=help_text)
@@ -147,7 +153,11 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Slurm {result.job.status}: {result.job.command}")
             if result.job.job_id:
                 print(f"Job ID: {result.job.job_id}")
-        print(f"2D videos pending: {len(result.pending_videos)}; 3D trials: {len(result.triangulation.outputs)}")
+        print(
+            f"2D videos pending: {len(result.pending_videos)}; "
+            f"filtered HDF5s: {len(result.filtering.outputs)}; "
+            f"3D trials: {len(result.triangulation.outputs)}"
+        )
         _print_triangulation_issues(result.triangulation)
         return
 
@@ -206,9 +216,21 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Converted {len(result.converted)} files; ready trials: {len(result.ready_trials)}")
         for trial, reason in sorted(result.skipped_trials.items()):
             print(f"[skip] {trial}: {reason}")
+    elif args.command == "filter":
+        converted = pose.convert_dlc_output_to_anipose(session)
+        result = pose.filter_2d(session, converted)
+        print(
+            f"Filtered {len(result.outputs)} files; "
+            f"ready trials: {len(result.ready_trials)}"
+        )
+        for trial, reason in sorted(result.skipped_trials.items()):
+            print(f"[skip] {trial}: {reason}")
+        if result.anipose_output and result.skipped_trials:
+            print("Anipose output:\n" + result.anipose_output)
     elif args.command == "triangulate":
         converted = pose.convert_dlc_output_to_anipose(session)
-        result = pose.triangulate(session, converted)
+        filtered = pose.filter_2d(session, converted)
+        result = pose.triangulate(session, filtered)
         print(f"3D CSVs: {len(result.outputs)}")
         _print_triangulation_issues(result)
     elif args.command == "label-3d":
