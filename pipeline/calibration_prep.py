@@ -286,6 +286,7 @@ def calibration_target_detection_rate(
     flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
     aruco = getattr(cv2, "aruco", None)
     aruco_dictionary = None
+    aruco_detector = None
     if aruco is not None:
         dictionary_id = getattr(aruco, "DICT_4X4_50", None)
         if dictionary_id is not None:
@@ -293,6 +294,8 @@ def calibration_target_detection_rate(
                 aruco_dictionary = aruco.getPredefinedDictionary(dictionary_id)
             else:
                 aruco_dictionary = aruco.Dictionary_get(dictionary_id)
+            if hasattr(aruco, "ArucoDetector"):
+                aruco_detector = aruco.ArucoDetector(aruco_dictionary)
 
     for frame_idx in frame_indices:
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
@@ -304,7 +307,11 @@ def calibration_target_detection_rate(
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         target_found = False
         if aruco_dictionary is not None:
-            _, marker_ids, _ = aruco.detectMarkers(gray, aruco_dictionary)
+            if aruco_detector is not None:
+                _, marker_ids, _ = aruco_detector.detectMarkers(gray)
+            else:
+                # OpenCV versions predating ArucoDetector use the module API.
+                _, marker_ids, _ = aruco.detectMarkers(gray, aruco_dictionary)
             target_found = marker_ids is not None and len(marker_ids) >= 4
 
         if not target_found:
