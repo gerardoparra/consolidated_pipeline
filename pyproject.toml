@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 validation = ["aniposelib", "matplotlib"]
+model-development = ["PyYAML", "matplotlib"]
 
 [project.scripts]
 lb-pipeline = "pipeline.main:main"

@@ -104,6 +104,8 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lb-pipeline", description="Lockbox calibration and pose pipeline")
     commands = parser.add_subparsers(dest="command", required=True)
+    from .model_cli import add_model_parser
+    add_model_parser(commands, DEFAULT_SETUP)
     for name, help_text in (
         ("run", "Advance a raw or prepared session through all ready stages"),
         ("prepare", "Import, organize, and downsample a session"),
@@ -180,6 +182,13 @@ def _queue_stage(args: argparse.Namespace, setup: Setup) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == 'model':
+        from .model_cli import run_model_command
+        try:
+            run_model_command(args)
+        except (ValueError, RuntimeError, OSError, ImportError, KeyError) as exc:
+            parser.error(str(exc))
+        return
     if getattr(args, "slurm", False) and getattr(args, "slurm_pose", False):
         parser.error("Choose --slurm to queue the stage or --slurm-pose to queue only tracking")
     if getattr(args, "slurm", False) or getattr(args, "slurm_pose", False):

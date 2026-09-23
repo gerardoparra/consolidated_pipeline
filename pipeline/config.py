@@ -63,6 +63,18 @@ class Setup:
                 raise ValueError(f"setup.json needs an object named {key!r}")
         if data.get("experiment") not in {"mechanical_lockbox", "sliding_lockbox"}:
             raise ValueError("experiment must be mechanical_lockbox or sliding_lockbox")
+        development = data.get('model_development')
+        if development is not None:
+            if not isinstance(development, dict) or not isinstance(development.get('experiments'), dict):
+                raise ValueError('model_development.experiments must be an object')
+            variants = set()
+            for name, settings in development['experiments'].items():
+                if not isinstance(settings, dict) or not settings.get('project') or not settings.get('superanimal'):
+                    raise ValueError(f'Model experiment {name} requires project and superanimal')
+                variant = (settings['project'], settings.get('shuffle', 0))
+                if variant in variants:
+                    raise ValueError('Model experiments sharing a project must use distinct shuffles')
+                variants.add(variant)
         python = data["hosts"].get("hpc", {}).get("python_executable")
         if python is not None and (not isinstance(python, str) or not PurePosixPath(python).is_absolute()):
             raise ValueError("hosts.hpc.python_executable must be an absolute executable path")

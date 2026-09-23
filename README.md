@@ -1,5 +1,8 @@
 # MLB2 consolidated pipeline
 
+For SuperAnimal project initialization, reviewed keypoint matching, fine-tuning,
+memory replay, prediction, and benchmarking, see [model development](docs/model-development.md).
+
 This package prepares multi-camera sessions, calibrates cameras with Anipose,
 tracks 2D keypoints with the existing SuperAnimal camera models, and triangulates
 complete five-camera trials. It accepts a zip archive, a raw session folder, or

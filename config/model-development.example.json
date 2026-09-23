@@ -1,0 +1,56 @@
+{
+  "model_development": {
+    "experiments": {
+      "top-finetune": {
+        "project": "projects/top",
+        "task": "lockbox_top",
+        "scorer": "MLB23",
+        "superanimal": "superanimal_topviewmouse",
+        "model_name": "hrnet_w32",
+        "detector_name": "fasterrcnn_resnet50_fpn_v2",
+        "bodyparts": ["nose", "ear_left", "ear_right", "tail_base"],
+        "videos": ["data/top/development/source.avi"],
+        "labeled_data": ["data/top/development/labeled-data/source"],
+        "prediction_inputs": ["data/top/inspection"],
+        "mode": "finetune",
+        "shuffle": 0,
+        "seed": 42,
+        "train_fraction": 0.8,
+        "training": {"epochs": 50, "batch_size": 8, "save_epochs": 10, "detector_epochs": 0, "display_iters": 10},
+        "benchmark": {
+          "labels": "data/top/benchmark/labeled-data",
+          "conversion_table": "reviewed/top.csv",
+          "bodyparts": ["nose", "ear_left", "ear_right", "tail_base"],
+          "confidence": 0.5,
+          "radius_px": 5,
+          "groups": {"head": ["nose", "ear_left", "ear_right"]}
+        }
+      },
+      "sidefront-finetune": {
+        "project": "projects/sidefront",
+        "task": "lockbox_sidefront",
+        "scorer": "MLB23",
+        "superanimal": "superanimal_quadruped",
+        "model_name": "hrnet_w32",
+        "detector_name": "fasterrcnn_resnet50_fpn_v2",
+        "bodyparts": ["nose", "ear_left", "ear_right", "front_paw_left", "front_paw_right", "back_paw_left", "back_paw_right", "tail_base"],
+        "videos": ["data/sidefront/development/source.avi"],
+        "labeled_data": ["data/sidefront/development/labeled-data/source"],
+        "prediction_inputs": ["data/sidefront/inspection"],
+        "mode": "finetune",
+        "shuffle": 0,
+        "seed": 42,
+        "train_fraction": 0.8,
+        "training": {"epochs": 50, "batch_size": 8, "save_epochs": 10, "detector_epochs": 0, "display_iters": 10},
+        "benchmark": {
+          "labels": "data/sidefront/benchmark/labeled-data",
+          "conversion_table": "reviewed/sidefront.csv",
+          "bodyparts": ["nose", "ear_left", "ear_right", "front_paw_left", "front_paw_right", "back_paw_left", "back_paw_right", "tail_base"],
+          "confidence": 0.5,
+          "radius_px": 5,
+          "groups": {"head": ["nose", "ear_left", "ear_right"], "paws": ["front_paw_left", "front_paw_right", "back_paw_left", "back_paw_right"]}
+        }
+      }
+    }
+  }
+}

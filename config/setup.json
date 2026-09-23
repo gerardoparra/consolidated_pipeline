@@ -2,11 +2,13 @@
   "experiment": "sliding_lockbox",
   "hosts": {
     "local": {
+      "development_root": "C:\\Users\\Gerardo\\Documents\\Lockbox\\mlb2\\model-development",
       "experiment_dir": "C:\\Users\\Gerardo\\Documents\\Lockbox\\mlb2\\experiment",
       "anipose_command": ["C:\\ProgramData\\anaconda3\\Scripts\\conda.exe", "run", "-n", "anipose", "anipose"],
       "model_folder": "C:\\Users\\Gerardo\\Documents\\Lockbox\\mlb2\\models\\superanimal_top-mlb2-2026-08-27"
     },
     "hpc": {
+      "development_root": "/scratch/lbshks/mlb2/model-development",
       "experiment_dir": "/scratch/lbshks/mlb2/experiment",
       "repository_dir": "/scratch/lbshks/super_animal/consolidated_pipeline",
       "anipose_command": ["anipose"],
@@ -17,6 +19,7 @@
       "singularity_module": "singularity"
     }
   },
+  "model_development": {"experiments": {}},
   "cages": {
     "CAGE1": {"camera06": "top", "camera07": "front", "camera08": "left", "camera09": "right", "camera10": "back"},
     "CAGE2": {"camera01": "left", "camera02": "front", "camera03": "right", "camera04": "top", "camera05": "back"}
