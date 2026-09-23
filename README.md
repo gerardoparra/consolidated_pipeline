@@ -50,6 +50,62 @@ setting removes previews from sessions that are not rerun through the worker.
 
 ## Run one session
 
+On HPC, submit any stage from the login node using its name, input path, and
+`--job`. Activate the host environment once; no shell-script editing or manual
+compute allocation is needed:
+
+```bash
+cd /scratch/lbshks/super_animal/consolidated_pipeline
+source /scratch/lbshks/super_animal/.venv/bin/activate
+mlb2-pipeline calibrate /path/to/session --job
+mlb2-pipeline triangulate /path/to/session --job
+mlb2-pipeline pose /path/to/session --job
+mlb2-pipeline prepare /path/to/session.zip --job
+```
+
+`python -m pipeline.main STAGE PATH --job` is equivalent. Every public stage
+accepts `--job`, including `labels`, `evaluate`, and `label-3d`; their usual
+options are forwarded. Submission returns immediately with the job ID, log
+paths, and commands to check or cancel the job. All processing happens on the
+compute node. The paths must be accessible there. CPU submissions each create
+a new job; GPU tracking retains its saved-job protection and `--retry-job`.
+
+CPU stages use the cluster's default partition and resources. Override them
+only if needed in `setup.json`, independently of the existing GPU settings:
+
+```json
+"slurm": {
+  "cpu": {
+    "partition": "YOUR_CPU_PARTITION",
+    "cpus": 8,
+    "memory": "32G",
+    "time": "02:00:00"
+  }
+}
+```
+
+Merge this `cpu` object into the existing `slurm` object; retain the GPU keys.
+The supplied `"cpu": {}` leaves every CPU resource option to Slurm. CPU jobs
+inherit the submitting environment and use its Python interpreter, or the
+optional absolute `hosts.hpc.python_executable` path. Activate an environment
+with the pipeline and Anipose installed and load any required tools before
+submitting. Optional headless visualization still needs the display setup
+described below. Submission records and stdout/stderr logs are stored under
+the configured repository's `logs/` directory.
+
+To queue the full run:
+
+```bash
+mlb2-pipeline run /path/to/session --job
+```
+
+This queues CPU preparation/calibration and submits GPU tracking when needed.
+It does not automatically queue a continuation after tracking. Once tracking
+finishes, rerun using the **prepared session directory** to complete 3D work.
+For ZIP/raw inputs, use the resulting session under the configured experiment
+directory. `run --submit` retains its earlier behavior: CPU work runs in the
+calling shell and only tracking is submitted. Use `--job` from the login node.
+
 From this repository, use Python 3.10 or newer:
 
 ```powershell
@@ -73,7 +129,7 @@ source /scratch/lbshks/super_animal/.venv/bin/activate
 python -m pipeline.main run /scratch/lbshks/mlb2/experiment/SESSION_NAME --environment hpc --submit
 ```
 
-`--submit` is required for Slurm submission. Jobs are scoped to the selected
+`--submit` (or `--job`) enables Slurm submission. GPU jobs are scoped to the selected
 session; the returned job ID is saved in that session's `pipeline_state.json`.
 Repeated runs will show the saved ID instead of submitting a duplicate. If a
 job has ended without producing tracks, `pose SESSION_NAME --submit --retry-job`
@@ -307,9 +363,10 @@ There are two Python environments. Preparation, calibration, conversion, and
 triangulation use a **host Python environment** with this package and Anipose.
 The GPU Slurm worker uses Python **inside the Singularity sandbox**; installing
 DeepLabCut only in the host environment will not make it available to the worker.
-The current `run` command performs preparation and calibration in the shell
-that invokes it, so use a CPU allocation for a full session rather than doing
-that work on the login node. The GPU worker is submitted separately by `--submit`.
+Without `--job`, `run` performs preparation and calibration in the shell
+that invokes it, so use a CPU allocation for that form. With `--job`, submit
+directly from the login node; CPU work is queued and the GPU worker is submitted
+from that job when needed.
 
 First, clone the whole repository at the `hosts.hpc.repository_dir` in
 `config/setup.json` (currently

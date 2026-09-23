@@ -93,6 +93,7 @@
     "constraints": [["left_eye", "nose"], ["nose", "right_eye"], ["left_eye", "right_eye"], ["nose", "tail_base"], ["tail_base", "tail_end"]]
   },
   "slurm": {
+    "cpu": {},
     "partition": "ex_scioi_gpu,scioi_gpu,gpu",
     "gres": "gpu:1",
     "constraint": "gpu",

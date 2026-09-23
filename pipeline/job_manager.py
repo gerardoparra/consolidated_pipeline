@@ -1,4 +1,4 @@
-"""Preview, submit, and remember one SuperAnimal Slurm job per experiment."""
+"""Submit CPU stages and preview or submit session-scoped SuperAnimal jobs."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -22,14 +23,64 @@ class JobResult:
     status: str
     command: str
     job_id: str | None = None
+    output_log: str | None = None
+    error_log: str | None = None
+
+
+def _submit(command: list[str], script: str | None = None) -> str:
+    try:
+        completed = subprocess.run(command, check=True, text=True, capture_output=True,
+                                   **({"input": script} if script is not None else {}))
+    except FileNotFoundError as exc:
+        raise RuntimeError("sbatch is unavailable; run this command on an HPC login node") from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"sbatch failed: {exc.stderr or exc.stdout}") from exc
+    match = re.fullmatch(r"(?:Submitted batch job )?(\d+)(?:;[^\s;]+)?", completed.stdout.strip())
+    if not match:
+        raise RuntimeError(f"Could not read a Slurm job ID from: {completed.stdout!r}")
+    return match.group(1)
+
+
+def submit_stage(setup: dict, stage: str, arguments: list[str]) -> JobResult:
+    """Queue a host-Python stage without running any session processing."""
+    if _is_windows():
+        raise RuntimeError("Slurm submission must run on the HPC host")
+    hpc = setup["hosts"]["hpc"]
+    repository = Path(hpc["repository_dir"])
+    python = Path(hpc.get("python_executable") or sys.executable)
+    for path in (repository, repository / "pipeline" / "main.py", python):
+        if not path.exists():
+            raise FileNotFoundError(f"HPC job dependency is missing: {path}")
+    logs = repository / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    output = str(logs / f"{stage}-%j.out")
+    error = str(logs / f"{stage}-%j.err")
+    command = ["sbatch", "--parsable", "--job-name", f"mlb2-{stage}",
+               "--chdir", str(repository), "--output", output, "--error", error,
+               "--export=ALL"]
+    for key, flag in (("partition", "--partition"), ("cpus", "--cpus-per-task"),
+                      ("memory", "--mem"), ("time", "--time")):
+        value = setup["slurm"].get("cpu", {}).get(key)
+        if value is not None:
+            command.extend([flag, str(value)])
+    worker = [str(python), "-m", "pipeline.main", stage, *arguments]
+    script = "#!/bin/bash\nset -euo pipefail\nexec " + shlex.join(worker) + "\n"
+    job_id = _submit(command, script)
+    # Separate records also work for ZIPs and raw folders that the worker moves.
+    record = logs / f"submission-{job_id}.json"
+    record.write_text(json.dumps({"stage": stage, "job_id": job_id,
+                                 "command": worker}, indent=2) + "\n", encoding="utf-8")
+    return JobResult("submitted", shlex.join(command), job_id,
+                     output.replace("%j", job_id), error.replace("%j", job_id))
 
 
 class JobManager:
     def __init__(self, experiment_dir: str | Path, setup: dict,
-                 session_dir: str | Path | None = None):
+                 session_dir: str | Path | None = None, *, setup_path: Path | None = None):
         self.experiment_dir = Path(experiment_dir).expanduser().resolve()
         self.setup = setup
         self.session_dir = Path(session_dir).expanduser().resolve() if session_dir else None
+        self.setup_path = setup_path
 
     @property
     def state_path(self) -> Path:
@@ -42,16 +93,33 @@ class JobManager:
             return None
 
     def _save_job_id(self, job_id: str) -> None:
-        self.state_path.write_text(json.dumps({"pose_job_id": job_id}, indent=2) + "\n", encoding="utf-8")
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            state = {}
+        state["pose_job_id"] = job_id
+        self.state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+    def _root(self) -> Path | PurePosixPath:
+        if self.setup_path is not None:
+            return self.session_dir or self.experiment_dir
+        root = PurePosixPath(self.setup["hosts"]["hpc"]["experiment_dir"])
+        return root / self.session_dir.name if self.session_dir else root
+
+    def _result(self, status: str, job_id: str) -> JobResult:
+        command = self.command()
+        name = self.setup["slurm"]["job_name"]
+        logs = [command[command.index(flag) + 1].replace("%x", name).replace("%j", job_id)
+                for flag in ("--output", "--error")]
+        return JobResult(status, shlex.join(command), job_id, *logs)
 
     def command(self) -> list[str]:
         hpc = self.setup["hosts"]["hpc"]
         pose = self.setup["pose"]
         slurm = self.setup["slurm"]
-        root = PurePosixPath(hpc["experiment_dir"])
-        if self.session_dir:
-            root /= self.session_dir.name
+        root = self._root()
         repository, setup_json, wrapper = hpc_repository_paths(hpc)
+        setup_json = self.setup_path or setup_json
         exports = ["ALL"] + [f"{key}={value}" for key, value in (
             ("PIPELINE_REPOSITORY", repository),
             ("PIPELINE_SETUP", setup_json),
@@ -64,7 +132,7 @@ class JobManager:
             ("PIPELINE_ADAPT_BATCH_SIZE", pose["adapt_batch_size"]),
         )]
         return [
-            "sbatch", "--job-name", slurm["job_name"],
+            "sbatch", "--parsable", "--job-name", slurm["job_name"],
             "--partition", slurm["partition"],
             "--gres", slurm["gres"],
             "--constraint", slurm["constraint"],
@@ -88,24 +156,15 @@ class JobManager:
             raise RuntimeError("Slurm submission must run on the HPC host; use preview on Windows")
         saved = self._saved_job_id()
         if saved and not retry:
-            return JobResult("pending", shlex.join(self.command()), saved)
+            return self._result("pending", saved)
         hpc = self.setup["hosts"]["hpc"]
         repository, setup_json, wrapper = hpc_repository_paths(hpc)
-        root = Path(hpc["experiment_dir"])
-        if self.session_dir:
-            root /= self.session_dir.name
+        setup_json = self.setup_path or setup_json
+        root = Path(self._root())
         for path in (root, Path(repository), Path(wrapper), Path(setup_json), Path(hpc["sandbox"])):
             if not path.exists():
                 raise FileNotFoundError(f"HPC job dependency is missing: {path}")
         Path(repository / "logs").mkdir(parents=True, exist_ok=True)
-        try:
-            completed = subprocess.run(self.command(), check=True, text=True, capture_output=True)
-        except FileNotFoundError as exc:
-            raise RuntimeError("sbatch is unavailable; run this command on an HPC login node") from exc
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(f"sbatch failed: {exc.stderr or exc.stdout}") from exc
-        match = re.search(r"Submitted batch job (\d+)", completed.stdout)
-        if not match:
-            raise RuntimeError(f"Could not read a Slurm job ID from: {completed.stdout!r}")
-        self._save_job_id(match.group(1))
-        return JobResult("submitted", shlex.join(self.command()), match.group(1))
+        job_id = _submit(self.command())
+        self._save_job_id(job_id)
+        return self._result("submitted", job_id)

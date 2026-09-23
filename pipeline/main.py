@@ -10,7 +10,7 @@ from .calibration_processor import CalibrationProcessor, CalibrationResult
 from .config import Setup
 from .conversion import ConversionResult
 from .file_handler import FileHandler
-from .job_manager import JobManager, JobResult
+from .job_manager import JobManager, JobResult, submit_stage
 from .pose_processor import FilteringResult, PoseProcessor, TriangulationResult
 from .video_processor import VideoProcessor
 
@@ -53,13 +53,16 @@ def run_pose_detection_pipeline(
     is available only through the separate ``evaluate`` command.
     """
     setup = Setup.load(setup_json)
+    if submit_jobs and setup.host_name(environment) != "hpc":
+        raise ValueError("Slurm submission must run on HPC; use --environment hpc on the HPC host")
     root = setup.experiment_dir(environment, experiment_dir)
     file_handler = FileHandler(root, setup.data)
     video_processor = VideoProcessor(root, setup.data)
     calibration_processor = CalibrationProcessor(root, setup.data, environment=setup.host_name(environment))
     pose_processor = PoseProcessor(root, setup.data, environment=setup.host_name(environment))
     session = file_handler.import_raw_data(source_path)
-    job_manager = JobManager(root, setup.data, session)
+    job_manager = JobManager(root, setup.data, session,
+                             setup_path=setup.path if setup.host_name(environment) == "hpc" else None)
     video_processor.prepare(session)
     video_processor.downsample(session)
     setup.materialize(root, environment, session.name)
@@ -89,6 +92,8 @@ def run_pose_detection_pipeline(
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--job", action="store_true",
+                        help="Queue this stage on HPC and return immediately")
     parser.add_argument("--config", type=Path, default=DEFAULT_SETUP,
                         help="Single setup JSON (default: config/setup.json)")
     parser.add_argument("--environment", choices=("auto", "local", "hpc"), default="auto")
@@ -139,9 +144,52 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_job(stage: str, result: JobResult) -> None:
+    print(f"{stage}: Slurm {result.status}; Job ID: {result.job_id}")
+    if result.output_log:
+        print(f"Output log: {result.output_log}\nError log: {result.error_log}")
+    if result.job_id:
+        print(f"Status: squeue -j {result.job_id}\nCancel: scancel {result.job_id}")
+
+
+def _queue_stage(args: argparse.Namespace, setup: Setup) -> None:
+    source = getattr(args, "source", None) or args.session
+    source = source.expanduser().resolve()
+    if not source.exists() or (args.command not in {"run", "prepare"} and not source.is_dir()):
+        raise ValueError(f"Input path does not exist or is not a session directory: {source}")
+    root = setup.experiment_dir("hpc", args.experiment_dir)
+    if args.command == "pose":
+        result = JobManager(root, setup.data, source, setup_path=setup.path).submit(retry=args.retry_job)
+    else:
+        arguments = [str(source), "--config", str(setup.path), "--environment", "hpc",
+                     "--experiment-dir", str(root)]
+        for key in ("labels", "dlc_project"):
+            value = getattr(args, key, None)
+            if value is not None:
+                arguments.extend(["--" + key.replace("_", "-"), str(value.expanduser().resolve())])
+        if args.command == "labels":
+            arguments.extend(["--frame-index", str(args.frame_index)])
+        if args.command == "run":
+            arguments.append("--submit")
+        result = submit_stage(setup.data, args.command, arguments)
+    _print_job(args.command, result)
+    if args.command == "run":
+        print("After GPU tracking finishes, rerun with the prepared session path to finish 3D processing.")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "job", False) or getattr(args, "submit", False):
+        try:
+            setup = Setup.load(args.config)
+            if setup.host_name(args.environment) != "hpc":
+                raise ValueError("Slurm submission must run on HPC; run this command on the HPC host")
+            if args.job:
+                _queue_stage(args, setup)
+                return
+        except (ValueError, RuntimeError, OSError) as exc:
+            parser.error(str(exc))
     if args.command == "run":
         result = run_pose_detection_pipeline(
             args.source, args.experiment_dir, args.config,
@@ -206,7 +254,8 @@ def main(argv: list[str] | None = None) -> None:
         if not pending:
             print("All 2D tracks already exist")
         else:
-            manager = JobManager(root, setup.data, session)
+            manager = JobManager(root, setup.data, session,
+                                 setup_path=setup.path if setup.host_name(args.environment) == "hpc" else None)
             result = manager.submit(retry=args.retry_job) if args.submit else manager.preview()
             print(f"{len(pending)} videos pending; Slurm {result.status}: {result.command}")
             if result.job_id:

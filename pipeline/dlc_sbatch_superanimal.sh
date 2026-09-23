@@ -22,6 +22,7 @@ module load "$PIPELINE_MODULE"
 
 singularity exec --nv --containall \
     --bind "$PIPELINE_REPOSITORY:$PIPELINE_REPOSITORY:ro" \
+    --bind "$PIPELINE_SETUP:$PIPELINE_SETUP:ro" \
     --bind "$VIDEO_ROOT:$VIDEO_ROOT" \
     --bind "$PIPELINE_CACHE:$PIPELINE_CACHE" \
     --bind "$PIPELINE_TMP:$PIPELINE_TMP" \

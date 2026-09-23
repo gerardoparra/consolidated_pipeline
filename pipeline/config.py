@@ -63,6 +63,20 @@ class Setup:
                 raise ValueError(f"setup.json needs an object named {key!r}")
         if data.get("experiment") not in {"mechanical_lockbox", "sliding_lockbox"}:
             raise ValueError("experiment must be mechanical_lockbox or sliding_lockbox")
+        cpu = data["slurm"].get("cpu", {})
+        if not isinstance(cpu, dict) or set(cpu) - {"partition", "cpus", "memory", "time"}:
+            raise ValueError("slurm.cpu must contain only partition, cpus, memory, and time")
+        for key, value in cpu.items():
+            if value is None:
+                continue
+            if key == "cpus":
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                    raise ValueError("slurm.cpu.cpus must be a positive integer")
+            elif not isinstance(value, str) or not value.strip():
+                raise ValueError(f"slurm.cpu.{key} must be a nonempty string")
+        python = data["hosts"].get("hpc", {}).get("python_executable")
+        if python is not None and (not isinstance(python, str) or not PurePosixPath(python).is_absolute()):
+            raise ValueError("hosts.hpc.python_executable must be an absolute executable path")
         if not data["cages"]:
             raise ValueError("At least one cage/box camera map is required")
         for host_name in ("local", "hpc"):
