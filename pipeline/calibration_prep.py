@@ -256,7 +256,7 @@ def calibration_target_detection_rate(
     try:
         import cv2  # type: ignore
     except ModuleNotFoundError as exc:
-        raise RuntimeError("OpenCV is required: pip install opencv-python") from exc
+        raise RuntimeError("OpenCV is required: pip install opencv-contrib-python-headless") from exc
 
     if sample_count < 1:
         raise ValueError("sample_count must be at least 1")
@@ -367,7 +367,7 @@ def get_video_meta(video_path: Path) -> VideoMeta:
     try:
         import cv2  # type: ignore
     except ModuleNotFoundError as exc:
-        raise RuntimeError("OpenCV is required: pip install opencv-python") from exc
+        raise RuntimeError("OpenCV is required: pip install opencv-contrib-python-headless") from exc
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -441,7 +441,7 @@ def downsample_video(meta: VideoMeta, times: list[float], out_path: Path, out_fp
     try:
         import cv2  # type: ignore
     except ModuleNotFoundError as exc:
-        raise RuntimeError("OpenCV is required: pip install opencv-python") from exc
+        raise RuntimeError("OpenCV is required: pip install opencv-contrib-python-headless") from exc
 
     cap = cv2.VideoCapture(str(meta.path))
     if not cap.isOpened():

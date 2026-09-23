@@ -59,6 +59,8 @@ python -m pip install -e . anipose
 
 If you already have a working Python/Anipose environment, activate it and run the installation command there. Configure `anipose_command` to use that environment as described below. Activate your environment again in each new terminal before running the pipeline.
 
+The pipeline uses `opencv-contrib-python-headless` for video processing and calibration without OpenCV GUI libraries. Existing environments and Anipose installations can still contain other OpenCV packages that share the same `cv2` files. After installing the pipeline and any extras, follow the [OpenCV cleanup instructions](docs/hpc-setup.md#headless-opencv-and-existing-environments), especially on HPC nodes reporting `ImportError: libGL.so.1`.
+
 Install extras only for the features you need:
 
 | Feature | Installation command |
@@ -77,6 +79,8 @@ anipose --help
 python -c "import numpy, pandas, tables, cv2; assert hasattr(cv2, 'aruco')"
 python -m pip check
 ```
+
+After the headless replacement, `pip check` may report Anipose/Aniposelib's declared `opencv-contrib-python` dependency as missing. See the cleanup instructions for this package-name mismatch; investigate other dependency errors separately.
 
 If `lb-pipeline` is unavailable, reinstall with `python -m pip install -e .` in the active environment. From the repository, `python -m pipeline.main` is an equivalent entry point.
 

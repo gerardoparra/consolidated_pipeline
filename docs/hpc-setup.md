@@ -5,6 +5,7 @@
 Use this guide when provisioning the cluster environments or enabling 3D preview rendering. The paths below match the checked-in MLB2 setup; replace them if your storage layout differs.
 
 - [Host environment](#host-environment)
+- [Headless OpenCV and existing environments](#headless-opencv-and-existing-environments)
 - [DLC GPU container](#dlc-gpu-container)
 - [Optional visualization dependencies](#optional-visualization-dependencies)
 
@@ -55,6 +56,9 @@ python -m pip install -e '.[validation]'
 python -m pip install 'anipose[viz]'
 ```
 
+After these installs, complete the [OpenCV cleanup](#headless-opencv-and-existing-environments)
+below before checking imports or processing a session.
+
 Activate the host `.venv` in every shell or CPU job that runs the CLI. The
 configured HPC `anipose_command` is `anipose`, so it must be on `PATH` in
 the activated environment. Anipose's [installation guide](https://anipose.readthedocs.io/en/latest/installation.html)
@@ -67,19 +71,62 @@ anipose --help
 python -m pip check
 ```
 
+### Headless OpenCV and existing environments
+
+The pipeline depends on `opencv-contrib-python-headless`. It provides video
+processing and the ArUco/ChArUco modules without OpenCV's GUI dependencies, so
+importing it does not require the GUI build's `libGL.so.1` on compute nodes.
+The pipeline does not use OpenCV display windows. Optional Mayavi/VTK rendering
+has its own graphics requirements, described below.
+
+Updating this checkout does not remove an old OpenCV installation. Also,
+[Anipose](https://github.com/lambdaloop/anipose/blob/master/setup.py) and
+[Aniposelib](https://github.com/lambdaloop/aniposelib/blob/master/setup.py)
+declare `opencv-contrib-python` as a dependency, so installing or updating them
+(including the validation or visualization extras) can restore the GUI build.
+Pip does not treat the headless package as satisfying that package name.
+
+After installing the pipeline and all desired extras, run the following in the
+activated host environment. This keeps the installed headless version and its
+resolved NumPy dependency, removes all overlapping OpenCV distributions, and
+reinstalls only the headless contrib build. Removing all variants first matters
+because they share `cv2` files; see the
+[OpenCV package guidance](https://pypi.org/project/opencv-python-headless/).
+
+```bash
+PIPELINE_OPENCV_VERSION=$(python -c 'from importlib.metadata import version; print(version("opencv-contrib-python-headless"))')
+python -m pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless opencv-contrib-python-headless
+python -m pip install --no-deps "opencv-contrib-python-headless==$PIPELINE_OPENCV_VERSION"
+python -c "import cv2; assert hasattr(cv2, 'aruco'); print('OpenCV OK:', cv2.__version__)"
+```
+
+Repeat this cleanup after dependency installations that add another OpenCV
+variant. Verify the import inside the compute allocation as well as the login
+shell. `python -m pip check` may still report that Anipose or Aniposelib requires
+`opencv-contrib-python`: this is the known distribution-name mismatch, despite
+the replacement providing `cv2`. Investigate other dependency errors separately.
+The pipeline itself now declares the headless package correctly.
+
 ## DLC GPU container
 
 The worker script loads the configured `singularity` module and executes
 `hosts.hpc.sandbox` (currently `deeplabcut_sandbox`) with `--nv`. That sandbox
 must have Python 3.10+, a GPU-compatible PyTorch installation, DeepLabCut 3 with
 PyTorch and SuperAnimal/Model Zoo support, and the package runtime dependencies (`numpy`,
-`pandas`, `tables`, and `opencv-contrib-python`). When building or updating a
+`pandas`, `tables`, and `opencv-contrib-python-headless`). When building or updating a
 **writable** sandbox, install those Python packages inside it, using the
 container's Python and a PyTorch build compatible with the cluster driver:
 
 ```bash
-python3 -m pip install 'deeplabcut[gui,modelzoo]' numpy pandas tables opencv-contrib-python PyYAML matplotlib
+python3 -m pip install 'deeplabcut[modelzoo]' numpy pandas tables opencv-contrib-python-headless PyYAML matplotlib
 ```
+
+The batch worker does not need the DLC GUI extra. DLC or its dependencies may
+install another OpenCV distribution. After provisioning, apply the same
+[OpenCV cleanup](#headless-opencv-and-existing-environments) inside the writable
+sandbox, using `python3` in place of `python`, before running the worker check.
+Pip may report a similar package-name mismatch for dependencies requesting a
+different OpenCV distribution.
 
 PyYAML and matplotlib support the model-development stages as well as their reports.
 Verify that the installed DLC version exposes the PyTorch APIs used by those stages.
